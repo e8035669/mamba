@@ -83,6 +83,8 @@ else ()
     target_link_libraries(micromamba PRIVATE libmamba)
 endif ()
 
+target_link_libraries(micromamba PRIVATE atomic)
+
 set_property(TARGET micromamba PROPERTY CXX_STANDARD 17)
 
 install(TARGETS micromamba)
