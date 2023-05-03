@@ -35,7 +35,8 @@ namespace mamba
 #elif defined(__arm__) || defined(__thumb__)
 #ifdef ___ARM_ARCH_6__
         static const char MAMBA_PLATFORM[] = "linux-armv6l";
-#elif __ARM_ARCH_7__
+#elif defined(__ARM_ARCH_7__) || defined(__ARM_ARCH_7A__) || \
+      defined(__ARM_ARCH_7R__) || defined(__ARM_ARCH_7M__)
         static const char MAMBA_PLATFORM[] = "linux-armv7l";
 #else
 #error "Unknown Linux arm platform"
