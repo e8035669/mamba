@@ -393,6 +393,7 @@ macro(libmamba_create_target target_name linkage output_name)
                 spdlog::spdlog_header_only
                 fmt::fmt-header-only
              )
+            target_link_libraries(${target_name} PUBLIC atomic)
 
         elseif (WIN32)
 
@@ -493,6 +494,7 @@ macro(libmamba_create_target target_name linkage output_name)
             # header only version to avoid chasing after the correct fmt version mathching
             # the one used in the bundle
             spdlog::spdlog_header_only
+            atomic
         )
 
         add_compile_definitions(SPDLOG_FMT_EXTERNAL)
