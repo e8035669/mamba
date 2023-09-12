@@ -536,7 +536,7 @@ namespace mamba
 
     curl_off_t DownloadTarget::get_speed()
     {
-        auto speed = m_curl_handle->get_info<long>(CURLINFO_SPEED_DOWNLOAD_T);
+        auto speed = m_curl_handle->get_info<std::size_t>(CURLINFO_SPEED_DOWNLOAD_T);
         // TODO Should we just drop all code below with progress_bar and use value_or(0) in get_info
         // above instead?
         if (!speed.has_value())
@@ -590,7 +590,7 @@ namespace mamba
         avg_speed = get_speed();
         http_status = m_curl_handle->get_info<int>(CURLINFO_RESPONSE_CODE).value_or(10000);
         effective_url = m_curl_handle->get_info<char*>(CURLINFO_EFFECTIVE_URL).value();
-        downloaded_size = m_curl_handle->get_info<long>(CURLINFO_SIZE_DOWNLOAD_T).value_or(0);
+        downloaded_size = m_curl_handle->get_info<std::size_t>(CURLINFO_SIZE_DOWNLOAD_T).value_or(0);
 
         LOG_INFO << get_transfer_msg();
 
