@@ -5,17 +5,22 @@
 // The full license is in the file LICENSE, distributed with this software.
 
 #include <cassert>
+#include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <type_traits>
 
 #include <curl/urlapi.h>
 #include <fmt/format.h>
 
 #include "mamba/util/build.hpp"
+#include "mamba/util/encoding.hpp"
 #include "mamba/util/path_manip.hpp"
 #include "mamba/util/string.hpp"
+#include "mamba/util/tuple_hash.hpp"
 #include "mamba/util/url.hpp"
 #include "mamba/util/url_manip.hpp"
 
@@ -33,7 +38,7 @@ namespace mamba::util
          *
          * Never null, throw exception at construction if creating the handle fails.
          */
-        class CURLUrl
+        class CurlUrl
         {
         public:
 
@@ -42,29 +47,30 @@ namespace mamba::util
             using const_pointer = const value_type*;
             using flag_type = unsigned int;
 
-            CURLUrl();
-            CURLUrl(const std::string& url, flag_type flags = 0);
-            ~CURLUrl();
+            static auto parse(const std::string& url, flag_type flags = 0)
+                -> tl::expected<CurlUrl, URL::ParseError>;
 
-            CURLUrl(const CURLUrl&) = delete;
-            CURLUrl& operator=(const CURLUrl&) = delete;
-            CURLUrl(CURLUrl&&) = delete;
-            CURLUrl& operator=(CURLUrl&&) = delete;
+            CurlUrl();
 
-            [[nodiscard]] auto get_part(CURLUPart part, flag_type flags = 0) const
-                -> std::optional<std::string>;
+            [[nodiscard]] auto
+            get_part(::CURLUPart part, flag_type flags = 0) const -> std::optional<std::string>;
 
         private:
 
-            pointer m_handle = nullptr;
+            struct CurlDeleter
+            {
+                void operator()(pointer ptr);
+            };
+
+            std::unique_ptr<value_type, CurlDeleter> m_handle = nullptr;
         };
 
         /**
          * A RAII wrapper for string mananged by CURL.
          *
-         * String can possibly be null, or zero-lenght, depending on the data returned by CURL.
+         * String can possibly be null, or zero-length, depending on the data returned by CURL.
          */
-        class CURLStr
+        class CurlStr
         {
             using value_type = char;
             using pointer = value_type*;
@@ -74,13 +80,13 @@ namespace mamba::util
 
         public:
 
-            explicit CURLStr() = default;
-            ~CURLStr();
+            explicit CurlStr() = default;
+            ~CurlStr();
 
-            CURLStr(const CURLStr&) = delete;
-            CURLStr& operator=(const CURLStr&) = delete;
-            CURLStr(CURLStr&&) = delete;
-            CURLStr& operator=(CURLStr&&) = delete;
+            CurlStr(const CurlStr&) = delete;
+            auto operator=(const CurlStr&) -> CurlStr& = delete;
+            CurlStr(CurlStr&&) = delete;
+            auto operator=(CurlStr&&) -> CurlStr& = delete;
 
             [[nodiscard]] auto raw_input() -> input_pointer;
 
@@ -93,36 +99,40 @@ namespace mamba::util
             size_type m_len = { -1 };
         };
 
-        CURLUrl::CURLUrl()
+        auto
+        CurlUrl::parse(const std::string& url, flag_type flags) -> tl::expected<CurlUrl, URL::ParseError>
         {
-            m_handle = ::curl_url();
-            if (m_handle == nullptr)
-            {
-                throw std::runtime_error("Could not create CURLU handle");
-            }
-        }
-
-        CURLUrl::CURLUrl(const std::string& url, flag_type flags)
-            : CURLUrl()
-        {
-            const CURLUcode uc = ::curl_url_set(m_handle, CURLUPART_URL, url.c_str(), flags);
+            auto out = CurlUrl();
+            const CURLUcode uc = ::curl_url_set(out.m_handle.get(), CURLUPART_URL, url.c_str(), flags);
             if (uc != CURLUE_OK)
             {
-                throw std::invalid_argument(
-                    fmt::format(R"(Failed to parse URL "{}": {})", url, ::curl_url_strerror(uc))
-                );
+                return tl::make_unexpected(URL::ParseError{
+                    fmt::format(R"(Failed to parse URL "{}": {})", url, ::curl_url_strerror(uc)) });
+            }
+            return { std::move(out) };
+        }
+
+        CurlUrl::CurlUrl()
+        {
+            m_handle.reset(::curl_url());
+            if (m_handle == nullptr)
+            {
+                throw std::runtime_error("Could not create CurlUrl handle");
             }
         }
 
-        CURLUrl::~CURLUrl()
+        void CurlUrl::CurlDeleter::operator()(pointer ptr)
         {
-            ::curl_url_cleanup(m_handle);
+            if (ptr)
+            {
+                ::curl_url_cleanup(ptr);
+            }
         }
 
-        auto CURLUrl::get_part(CURLUPart part, flag_type flags) const -> std::optional<std::string>
+        auto CurlUrl::get_part(CURLUPart part, flag_type flags) const -> std::optional<std::string>
         {
-            CURLStr scheme{};
-            const auto rc = ::curl_url_get(m_handle, part, scheme.raw_input(), flags);
+            CurlStr scheme{};
+            const auto rc = ::curl_url_get(m_handle.get(), part, scheme.raw_input(), flags);
             if (!rc)
             {
                 if (auto str = scheme.str())
@@ -133,7 +143,7 @@ namespace mamba::util
             return std::nullopt;
         }
 
-        CURLStr::~CURLStr()
+        CurlStr::~CurlStr()
         {
             // Even when Curl returns a len along side the data, `curl_free` must be used without
             // len.
@@ -141,13 +151,13 @@ namespace mamba::util
             m_data = nullptr;
         }
 
-        auto CURLStr::raw_input() -> input_pointer
+        auto CurlStr::raw_input() -> input_pointer
         {
             assert(m_data == nullptr);  // Otherwise we leak Curl memory
             return &m_data;
         }
 
-        auto CURLStr::str() const -> std::optional<std::string_view>
+        auto CurlStr::str() const -> std::optional<std::string_view>
         {
             if (m_data)
             {
@@ -164,46 +174,68 @@ namespace mamba::util
         }
     }
 
-    /*****************************
-     * URLHandler implementation *
-     *****************************/
+    /**********************
+     * URL implementation *
+     **********************/
 
-    auto URL::parse(std::string_view url) -> URL
+    auto URL::parse(std::string_view url) -> tl::expected<URL, ParseError>
     {
         url = util::rstrip(url);
-        auto out = URL();
-        if (!url.empty())
+        if (url.empty())
         {
-            // CURL fails to parse the URL if no scheme is given, unless CURLU_DEFAULT_SCHEME is
-            // given
-            const CURLUrl handle = {
-                file_uri_unc2_to_unc4(url),
-                CURLU_NON_SUPPORT_SCHEME | CURLU_DEFAULT_SCHEME,
-            };
-            out.set_scheme(handle.get_part(CURLUPART_SCHEME).value_or(std::string(URL::https)));
-            out.set_user(handle.get_part(CURLUPART_USER).value_or(""), Encode::no);
-            out.set_password(handle.get_part(CURLUPART_PASSWORD).value_or(""), Encode::no);
-            out.set_host(handle.get_part(CURLUPART_HOST).value_or(""));
-            out.set_path(handle.get_part(CURLUPART_PATH).value_or("/"));
-            out.set_port(handle.get_part(CURLUPART_PORT).value_or(""));
-            out.set_query(handle.get_part(CURLUPART_QUERY).value_or(""));
-            out.set_fragment(handle.get_part(CURLUPART_FRAGMENT).value_or(""));
+            return tl::make_unexpected(ParseError{ "Empty URL" });
         }
-        return out;
+        return CurlUrl::parse(file_uri_unc2_to_unc4(url), CURLU_NON_SUPPORT_SCHEME | CURLU_DEFAULT_SCHEME)
+            .transform(
+                [&](CurlUrl&& handle) -> URL
+                {
+                    auto out = URL();
+                    // CURL fails to parse the URL if no scheme is given, unless
+                    // CURLU_DEFAULT_SCHEME is given
+                    out.set_scheme(handle.get_part(CURLUPART_SCHEME).value_or(""));
+                    out.set_user(handle.get_part(CURLUPART_USER).value_or(""), Encode::no);
+                    out.set_password(handle.get_part(CURLUPART_PASSWORD).value_or(""), Encode::no);
+                    out.set_host(handle.get_part(CURLUPART_HOST).value_or(""), Encode::no);
+                    out.set_path(handle.get_part(CURLUPART_PATH).value_or("/"), Encode::no);
+                    out.set_port(handle.get_part(CURLUPART_PORT).value_or(""));
+                    out.set_query(handle.get_part(CURLUPART_QUERY).value_or(""));
+                    out.set_fragment(handle.get_part(CURLUPART_FRAGMENT).value_or(""));
+                    return out;
+                }
+            );
     }
 
-    auto URL::scheme() const -> const std::string&
+    auto URL::scheme_is_defaulted() const -> bool
     {
+        return m_scheme.empty();
+    }
+
+    auto URL::scheme() const -> std::string_view
+    {
+        if (scheme_is_defaulted())
+        {
+            return https;
+        }
         return m_scheme;
     }
 
     void URL::set_scheme(std::string_view scheme)
     {
-        if (scheme.empty())
-        {
-            throw std::invalid_argument("Cannot set empty scheme");
-        }
         m_scheme = util::to_lower(util::rstrip(scheme));
+    }
+
+    auto URL::clear_scheme() -> std::string
+    {
+        if (scheme_is_defaulted())
+        {
+            return std::string(https);
+        }
+        return std::exchange(m_scheme, "");
+    }
+
+    auto URL::has_user() const -> bool
+    {
+        return !m_user.empty();
     }
 
     auto URL::user(Decode::no_type) const -> const std::string&
@@ -213,12 +245,12 @@ namespace mamba::util
 
     auto URL::user(Decode::yes_type) const -> std::string
     {
-        return url_decode(user(Decode::no));
+        return decode_percent(user(Decode::no));
     }
 
     void URL::set_user(std::string_view user, Encode::yes_type)
     {
-        return set_user(url_encode(user), Encode::no);
+        return set_user(encode_percent(user), Encode::no);
     }
 
     void URL::set_user(std::string user, Encode::no_type)
@@ -231,6 +263,11 @@ namespace mamba::util
         return std::exchange(m_user, "");
     }
 
+    auto URL::has_password() const -> bool
+    {
+        return !m_password.empty();
+    }
+
     auto URL::password(Decode::no_type) const -> const std::string&
     {
         return m_password;
@@ -238,12 +275,12 @@ namespace mamba::util
 
     auto URL::password(Decode::yes_type) const -> std::string
     {
-        return url_decode(password(Decode::no));
+        return decode_percent(password(Decode::no));
     }
 
     void URL::set_password(std::string_view password, Encode::yes_type)
     {
-        return set_password(url_encode(password), Encode::no);
+        return set_password(encode_percent(password), Encode::no);
     }
 
     void URL::set_password(std::string password, Encode::no_type)
@@ -256,16 +293,74 @@ namespace mamba::util
         return std::exchange(m_password, "");
     }
 
+    namespace
+    {
+        template <typename Str, typename UGetter, typename PGetter>
+        auto
+        authentication_elems_impl(URL::Credentials credentials, UGetter&& get_user, PGetter&& get_password)
+        {
+            switch (credentials)
+            {
+                case (URL::Credentials::Show):
+                {
+                    Str user = get_user();
+                    Str pass = user.empty() ? "" : get_password();
+                    Str sep = pass.empty() ? "" : ":";
+                    return std::array<Str, 3>{ std::move(user), std::move(sep), std::move(pass) };
+                }
+                case (URL::Credentials::Hide):
+                {
+                    Str user = get_user();
+                    Str pass = user.empty() ? "" : "*****";
+                    Str sep = user.empty() ? "" : ":";
+                    return std::array<Str, 3>{ std::move(user), std::move(sep), std::move(pass) };
+                }
+                case (URL::Credentials::Remove):
+                {
+                    return std::array<Str, 3>{ "", "", "" };
+                }
+            }
+            assert(false);
+            throw std::invalid_argument("Invalid enum number");
+        }
+    }
+
+    auto URL::authentication_elems(Credentials credentials, Decode::no_type) const
+        -> std::array<std::string_view, 3>
+    {
+        return authentication_elems_impl<std::string_view>(
+            credentials,
+            [&]() -> std::string_view { return user(Decode::no); },
+            [&]() -> std::string_view { return password(Decode::no); }
+        );
+    }
+
+    auto URL::authentication_elems(Credentials credentials, Decode::yes_type) const
+        -> std::array<std::string, 3>
+    {
+        return authentication_elems_impl<std::string>(
+            credentials,
+            [&]() -> std::string { return user(Decode::yes); },
+            [&]() -> std::string { return password(Decode::yes); }
+        );
+    }
+
     auto URL::authentication() const -> std::string
     {
-        const auto& u = user(Decode::no);
-        const auto& p = password(Decode::no);
-        return p.empty() ? u : util::concat(u, ':', p);
+        return std::apply(
+            [](auto&&... elem) { return util::concat(std::forward<decltype(elem)>(elem)...); },
+            authentication_elems(Credentials::Show, Decode::no)
+        );
+    }
+
+    auto URL::host_is_defaulted() const -> bool
+    {
+        return m_host.empty();
     }
 
     auto URL::host(Decode::no_type) const -> std::string_view
     {
-        if ((m_scheme != "file") && m_host.empty())
+        if ((scheme() != "file") && host_is_defaulted())
         {
             return localhost;
         }
@@ -274,12 +369,12 @@ namespace mamba::util
 
     auto URL::host(Decode::yes_type) const -> std::string
     {
-        return url_decode(host(Decode::no));
+        return decode_percent(host(Decode::no));
     }
 
     void URL::set_host(std::string_view host, Encode::yes_type)
     {
-        return set_host(url_encode(host), Encode::no);
+        return set_host(encode_percent(host), Encode::no);
     }
 
     void URL::set_host(std::string host, Encode::no_type)
@@ -295,12 +390,9 @@ namespace mamba::util
 
     auto URL::clear_host() -> std::string
     {
-        // Cheap == comparison that works because of class invariant
-        if (auto l_host = host(Decode::no); l_host.data() != m_host.data())
+        if (host_is_defaulted())
         {
-            auto out = std::string(l_host);
-            set_host("", Encode::no);
-            return out;
+            return std::string(host(Decode::no));
         }
         return std::exchange(m_host, "");
     }
@@ -324,19 +416,50 @@ namespace mamba::util
         return std::exchange(m_port, "");
     }
 
-    auto URL::authority() const -> std::string
+    namespace
     {
-        const auto& l_user = user(Decode::no);
-        const auto& l_pass = password(Decode::no);
-        const auto& l_host = host(Decode::no);
-        return util::concat(
-            l_user,
-            l_pass.empty() ? "" : ":",
-            l_pass,
-            l_user.empty() ? "" : "@",
-            l_host,
-            m_port.empty() ? "" : ":",
-            m_port
+        template <typename Str>
+        auto authority_elems_impl(std::array<Str, 3> user_sep_pass, Str host, Str port)
+        {
+            const bool has_auth = !user_sep_pass[0].empty();
+            const bool has_port = !port.empty();
+            return std::array<Str, 7>{
+                std::move(user_sep_pass[0]),
+                std::move(user_sep_pass[1]),
+                std::move(user_sep_pass[2]),
+                Str(has_auth ? "@" : ""),
+                std::move(host),
+                Str(has_port ? ":" : ""),
+                std::move(port),
+            };
+        }
+    }
+
+    auto URL::authority_elems(Credentials credentials, Decode::no_type) const
+        -> std::array<std::string_view, 7>
+    {
+        return authority_elems_impl<std::string_view>(
+            authentication_elems(credentials, Decode::no),
+            host(Decode::no),
+            port()
+        );
+    }
+
+    auto
+    URL::authority_elems(Credentials credentials, Decode::yes_type) const -> std::array<std::string, 7>
+    {
+        return authority_elems_impl<std::string>(
+            authentication_elems(credentials, Decode::yes),
+            host(Decode::yes),
+            port()
+        );
+    }
+
+    auto URL::authority(Credentials credentials) const -> std::string
+    {
+        return std::apply(
+            [](auto&&... elem) { return util::concat(std::forward<decltype(elem)>(elem)...); },
+            authority_elems(credentials, Decode::no)
         );
     }
 
@@ -347,7 +470,7 @@ namespace mamba::util
 
     auto URL::path(Decode::yes_type) const -> std::string
     {
-        return url_decode(path(Decode::no));
+        return decode_percent(path(Decode::no));
     }
 
     void URL::set_path(std::string_view path, Encode::yes_type)
@@ -356,27 +479,19 @@ namespace mamba::util
         if (on_win && (scheme() == "file"))
         {
             auto [slashes, no_slash_path] = lstrip_parts(path, '/');
-            if (slashes.empty())
-            {
-                slashes = "/";
-            }
             if ((no_slash_path.size() >= 2) && path_has_drive_letter(no_slash_path))
             {
-                m_path = concat(
-                    slashes,
-                    no_slash_path.substr(0, 2),
-                    url_encode(no_slash_path.substr(2), '/')
+                return set_path(
+                    concat(
+                        slashes.empty() ? "/" : slashes,
+                        no_slash_path.substr(0, 2),
+                        encode_percent(no_slash_path.substr(2), '/')
+                    ),
+                    Encode::no
                 );
             }
-            else
-            {
-                m_path = concat(slashes, url_encode(no_slash_path, '/'));
-            }
         }
-        else
-        {
-            return set_path(url_encode(path, '/'), Encode::no);
-        }
+        return set_path(encode_percent(path, '/'), Encode::no);
     }
 
     void URL::set_path(std::string path, Encode::no_type)
@@ -396,26 +511,26 @@ namespace mamba::util
     auto URL::pretty_path() const -> std::string
     {
         // All paths start with a '/' except those like "file:///C:/folder/file.txt"
-        if (m_scheme == "file")
+        if (on_win && scheme() == "file")
         {
             assert(util::starts_with(m_path, '/'));
-            auto path_no_slash = url_decode(std::string_view(m_path).substr(1));
+            auto path_no_slash = decode_percent(std::string_view(m_path).substr(1));
             if (path_has_drive_letter(path_no_slash))
             {
                 return path_no_slash;
             }
         }
-        return url_decode(m_path);
+        return decode_percent(m_path);
     }
 
     void URL::append_path(std::string_view subpath, Encode::yes_type)
     {
-        if (path(Decode::no) == "/")
+        if (util::lstrip(path(Decode::no), '/').empty())
         {
-            // Allow hanldling of Windows drive letter encoding
+            // Allow handling of Windows drive letter encoding
             return set_path(std::string(subpath), Encode::yes);
         }
-        return append_path(url_encode(subpath, '/'), Encode::no);
+        return append_path(encode_percent(subpath, '/'), Encode::no);
     }
 
     void URL::append_path(std::string_view subpath, Encode::no_type)
@@ -464,18 +579,19 @@ namespace mamba::util
         return std::exchange(m_fragment, "");
     }
 
-    auto URL::str() -> std::string
+    auto URL::str(Credentials credentials) const -> std::string
     {
+        std::array<std::string_view, 7> authority = authority_elems(credentials, Decode::no);
         return util::concat(
             scheme(),
             "://",
-            user(Decode::no),
-            m_password.empty() ? "" : ":",
-            password(Decode::no),
-            m_user.empty() ? "" : "@",
-            host(Decode::no),
-            m_port.empty() ? "" : ":",
-            port(),
+            authority[0],
+            authority[1],
+            authority[2],
+            authority[3],
+            authority[4],
+            authority[5],
+            authority[6],
             path(Decode::no),
             m_query.empty() ? "" : "?",
             m_query,
@@ -484,12 +600,11 @@ namespace mamba::util
         );
     }
 
-    auto URL::pretty_str(StripScheme strip_scheme, char rstrip_path, HidePassword hide_password) const
-        -> std::string
+    auto URL::pretty_str_path(StripScheme strip_scheme, char rstrip_path) const -> std::string
     {
         std::string computed_path = {};
         // When stripping file scheme, not showing leading '/' for Windows path with drive
-        if ((m_scheme == "file") && (strip_scheme == StripScheme::yes) && host(Decode::no).empty())
+        if ((scheme() == "file") && (strip_scheme == StripScheme::yes) && host(Decode::no).empty())
         {
             computed_path = pretty_path();
         }
@@ -498,18 +613,24 @@ namespace mamba::util
             computed_path = path(Decode::yes);
         }
         computed_path = util::rstrip(computed_path, rstrip_path);
+        return computed_path;
+    }
 
+    auto URL::pretty_str(StripScheme strip_scheme, char rstrip_path, Credentials credentials) const
+        -> std::string
+    {
+        std::array<std::string, 7> authority = authority_elems(credentials, Decode::yes);
         return util::concat(
-            (strip_scheme == StripScheme::no) ? m_scheme : "",
+            (strip_scheme == StripScheme::no) ? scheme() : "",
             (strip_scheme == StripScheme::no) ? "://" : "",
-            user(Decode::yes),
-            m_password.empty() ? "" : ":",
-            (hide_password == HidePassword::no) ? password(Decode::yes) : "*****",
-            m_user.empty() ? "" : "@",
-            host(Decode::yes),
-            m_port.empty() ? "" : ":",
-            m_port,
-            computed_path,
+            authority[0],
+            authority[1],
+            authority[2],
+            authority[3],
+            authority[4],
+            authority[5],
+            authority[6],
+            pretty_str_path(strip_scheme, rstrip_path),
             m_query.empty() ? "" : "?",
             m_query,
             m_fragment.empty() ? "" : "#",
@@ -517,15 +638,34 @@ namespace mamba::util
         );
     }
 
+    namespace
+    {
+        auto attrs(URL const& url)
+        {
+            return std::tuple<
+                std::string_view,
+                const std::string&,
+                const std::string&,
+                std::string_view,
+                const std::string&,
+                const std::string&,
+                const std::string&,
+                const std::string&>{
+                url.scheme(),
+                url.user(URL::Decode::no),
+                url.password(URL::Decode::no),
+                url.host(URL::Decode::no),
+                url.port(),
+                url.path(URL::Decode::no),
+                url.query(),
+                url.fragment(),
+            };
+        }
+    }
+
     auto operator==(URL const& a, URL const& b) -> bool
     {
-        return (a.scheme() == b.scheme())
-               && (a.user() == b.user())
-               // omitting password, is that desirable?
-               && (a.host() == b.host())
-               // Would it be desirable to account for default ports?
-               && (a.port() == b.port()) && (a.path() == b.path()) && (a.query() == b.query())
-               && (a.fragment() == b.fragment());
+        return attrs(a) == attrs(b);
     }
 
     auto operator!=(URL const& a, URL const& b) -> bool
@@ -545,3 +685,9 @@ namespace mamba::util
     }
 
 }  // namespace mamba
+
+auto
+std::hash<mamba::util::URL>::operator()(const mamba::util::URL& u) const -> std::size_t
+{
+    return mamba::util::hash_tuple(mamba::util::attrs(u));
+}

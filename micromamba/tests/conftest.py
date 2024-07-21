@@ -2,7 +2,7 @@ import copy
 import os
 import pathlib
 import platform
-from typing import Any, Generator, Mapping
+from typing import Any, Generator, Mapping, Optional
 
 import pytest
 
@@ -76,11 +76,14 @@ def tmp_home(
 
     # Pytest would clean it automatically but this can be large (0.5 Gb for repodata)
     # We clean it explicitly
+    on_ci = "CI" in os.environ
     if not request.config.getoption("--no-eager-clean"):
         try:
             helpers.rmtree(new_home)
-        except PermissionError:
-            pass
+        # Silence possible cleanup exceptions on CI, weird things happening there
+        except Exception as e:
+            if not on_ci:
+                raise e
 
 
 @pytest.fixture
@@ -90,9 +93,7 @@ def tmp_clean_env(tmp_environ: None) -> None:
         if k.startswith(("CONDA", "_CONDA", "MAMBA", "_MAMBA", "XDG_")):
             del os.environ[k]
 
-    def keep_in_path(
-        p: str, prefix: str | None = tmp_environ.get("CONDA_PREFIX")
-    ) -> bool:
+    def keep_in_path(p: str, prefix: Optional[str] = tmp_environ.get("CONDA_PREFIX")) -> bool:
         if "condabin" in p:
             return False
         # On windows, PATH is also used for dyanamic libraries.
@@ -148,9 +149,14 @@ def tmp_root_prefix(
 
     # Pytest would clean it automatically but this can be large (0.5 Gb for repodata)
     # We clean it explicitly
+    on_ci = "CI" in os.environ
     if not request.config.getoption("--no-eager-clean"):
-        if new_root_prefix.exists():
+        try:
             helpers.rmtree(new_root_prefix)
+        # Silence possible cleanup exceptions on CI, weird things happening there
+        except Exception as e:
+            if not on_ci:
+                raise e
     # os.environ restored by tmp_clean_env and tmp_environ
 
 
@@ -184,48 +190,3 @@ def tmp_xtensor_env(tmp_prefix: pathlib.Path) -> Generator[pathlib.Path, None, N
     """An activated environment with Xtensor installed."""
     helpers.install("-c", "conda-forge", "--json", "xtensor", no_dry_run=True)
     yield tmp_prefix
-
-
-@pytest.fixture
-def user_config_dir(tmp_home: pathlib.Path) -> Generator[pathlib.Path, None, None]:
-    """Location of config files that are generated from mamba"""
-    maybe_xdg_config = os.getenv("XDG_CONFIG_DIR", "")
-    if maybe_xdg_config:
-        yield pathlib.Path(maybe_xdg_config)
-    system = platform.system()
-    if system == "Linux" or system == "Darwin":
-        yield tmp_home / ".config/mamba"
-    elif system == "Windows":
-        yield pathlib.Path(os.environ["APPDATA"]) / "mamba"
-    else:
-        raise RuntimeError(f"Unsupported system {system}")
-
-
-@pytest.fixture
-def user_data_dir(tmp_home: pathlib.Path) -> Generator[pathlib.Path, None, None]:
-    """Location of data files that are generated from mamba"""
-    maybe_xdg_data = os.getenv("XDG_DATA_DIR", "")
-    if maybe_xdg_data:
-        yield pathlib.Path(maybe_xdg_data)
-    system = platform.system()
-    if system == "Linux" or system == "Darwin":
-        yield tmp_home / ".local/share/mamba"
-    elif system == "Windows":
-        yield pathlib.Path(os.environ["APPDATA"]) / "mamba"
-    else:
-        raise RuntimeError(f"Unsupported system {system}")
-
-
-@pytest.fixture
-def user_cache_dir(tmp_home: pathlib.Path) -> Generator[pathlib.Path, None, None]:
-    """Location of data files that are generated from mamba"""
-    maybe_xdg_cache = os.getenv("XDG_CACHE_DIR", "")
-    if maybe_xdg_cache:
-        yield pathlib.Path(maybe_xdg_cache)
-    system = platform.system()
-    if system == "Linux" or system == "Darwin":
-        yield tmp_home / ".cache/mamba"
-    elif system == "Windows":
-        yield pathlib.Path(os.environ["LOCALAPPDATA"]) / "mamba"
-    else:
-        raise RuntimeError(f"Unsupported system {system}")

@@ -4,25 +4,16 @@
 #
 # The full license is in the file LICENSE, distributed with this software.
 
-cmake_minimum_required (VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0025 NEW) # Introduced in cmake 3.0
 cmake_policy(SET CMP0077 NEW) # Introduced in cmake 3.13
 project(micromamba)
 
-# Build options
-# =============
-option(BUILD_MICROMAMBA_SERVER "Build the micromamba server" OFF)
-
-if (BUILD_STATIC AND NOT BUILD_SHARED)
-    set(MICROMAMBA_LINKAGE "STATIC" CACHE STRING "micromamba linkage against libraries")
-else ()
-    set(MICROMAMBA_LINKAGE "DYNAMIC" CACHE STRING "micromamba linkage against libraries")
-endif ()
-
 # Source files
 # ============
 
-set(MICROMAMBA_SRCS
+set(
+    MICROMAMBA_SRCS
     longpath.manifest
     ${CMAKE_CURRENT_SOURCE_DIR}/src/activate.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/clean.cpp
@@ -47,45 +38,72 @@ set(MICROMAMBA_SRCS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/version.cpp
 )
 
-set(MICROMAMBA_HEADERS
+set(
+    MICROMAMBA_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/src/common_options.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/umamba.hpp
     ${CMAKE_CURRENT_SOURCE_DIR}/src/version.hpp
 )
 
 if(UNIX AND BUILD_MICROMAMBA_SERVER)
-    list(APPEND MICROMAMBA_SRCS
-        ${CMAKE_CURRENT_SOURCE_DIR}/src/server.cpp
-    )
+    list(APPEND MICROMAMBA_SRCS ${CMAKE_CURRENT_SOURCE_DIR}/src/server.cpp)
     add_definitions(-DMICROMAMBA_SERVER)
 endif()
 
-add_executable(micromamba ${MICROMAMBA_SRCS} ${MICROMAMBA_HEADERS})
-
-mamba_target_add_compile_warnings(micromamba WARNING_AS_ERROR ${MAMBA_WARNING_AS_ERROR})
-mamba_target_set_lto(micromamba MODE ${MAMBA_LTO})
-
-if(NOT (TARGET libmamba OR TARGET libmamba-static))
-    find_package(libmamba REQUIRED)
-endif ()
+# Targets and link
+# ================
 
 find_package(Threads REQUIRED)
-target_link_libraries(micromamba PRIVATE Threads::Threads)
+find_package(reproc REQUIRED)
+find_package(reproc++ REQUIRED)
 
-string(TOUPPER "${MICROMAMBA_LINKAGE}" linkage_upper)
-message(STATUS "Micromamba linkage: ${MICROMAMBA_LINKAGE}")
+macro(mambaexe_create_target target_name linkage output_name)
+    string(TOUPPER "${linkage}" linkage_upper)
+    if(NOT ${linkage_upper} MATCHES "^(SHARED|STATIC)$")
+        message(FATAL_ERROR "Invalid library linkage: ${linkage}")
+    endif()
 
-if (${MICROMAMBA_LINKAGE} STREQUAL "STATIC")
-    target_link_libraries(micromamba PRIVATE libmamba-static)
-    if (WIN32)
-        set_target_properties(micromamba PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    endif ()
-else ()
-    target_link_libraries(micromamba PRIVATE libmamba)
-endif ()
+    # Output
+    # ======
+    add_executable(${target_name} ${MICROMAMBA_SRCS} ${MICROMAMBA_HEADERS})
+    mamba_target_add_compile_warnings(${target_name} WARNING_AS_ERROR ${MAMBA_WARNING_AS_ERROR})
+    mamba_target_set_lto(${target_name} MODE ${MAMBA_LTO})
+    set_property(TARGET ${target_name} PROPERTY CXX_STANDARD 17)
 
-target_link_libraries(micromamba PRIVATE atomic)
+    target_link_libraries(${target_name} PRIVATE Threads::Threads reproc reproc++)
 
-set_property(TARGET micromamba PROPERTY CXX_STANDARD 17)
+    # Static build
+    # ============
+    if(${linkage_upper} STREQUAL "STATIC")
+        if(NOT (TARGET mamba::libmamba-static))
+            find_package(libmamba REQUIRED)
+        endif()
+        target_link_libraries(${target_name} PRIVATE mamba::libmamba-static)
+        # Dynamic build
+        # =============
+    else()
+        if(NOT (TARGET mamba::libmamba-dyn))
+            find_package(libmamba REQUIRED)
+        endif()
+        target_link_libraries(${target_name} PRIVATE mamba::libmamba-dyn)
+    endif()
 
-install(TARGETS micromamba)
+    list(APPEND mambaexe_targets ${target_name})
+endmacro()
+
+set(mambaexe_targets "")
+
+if(BUILD_SHARED)
+    message(STATUS "Adding executable mamba")
+    mambaexe_create_target(mamba SHARED mamba)
+endif()
+
+if(BUILD_STATIC)
+    message(STATUS "Adding executable micromamba")
+    mambaexe_create_target(micromamba STATIC micromamba)
+endif()
+
+# Installation
+# ============
+
+install(TARGETS ${mambaexe_targets})

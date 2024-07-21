@@ -7,27 +7,18 @@
 #ifndef MAMBA_CORE_UTIL_HPP
 #define MAMBA_CORE_UTIL_HPP
 
-#include <array>
 #include <chrono>
-#include <limits>
+#include <fstream>
+#include <map>
 #include <optional>
-#include <sstream>
 #include <string>
 #include <string_view>
-#include <unordered_map>
 #include <vector>
 
-#include <time.h>
-
 #include "mamba/core/error_handling.hpp"
-#include "mamba/core/mamba_fs.hpp"
+#include "mamba/fs/filesystem.hpp"
 
-#include "nlohmann/json.hpp"
 #include "tl/expected.hpp"
-
-#if defined(__PPC64__) || defined(__ppc64__) || defined(_ARCH_PPC64)
-#include <iomanip>
-#endif
 
 #define MAMBA_EMPTY_SHA "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
@@ -42,8 +33,6 @@ namespace mamba
         {
         }
     };
-
-    bool is_package_file(std::string_view fn);
 
     bool lexists(const fs::u8path& p);
     bool lexists(const fs::u8path& p, std::error_code& ec);
@@ -109,7 +98,6 @@ namespace mamba
     //    const auto result = set_persist_temporary_directories(must_persist);
     //    result == must_persist && must_persist_temporary_directories() == must_persist
     bool set_persist_temporary_directories(bool will_persist);
-
 
     class TemporaryDirectory
     {
@@ -234,7 +222,7 @@ namespace mamba
     //          {
     //              print("locked file {}, locking counts: {}", some_path,
     //              lock.count_lock_owners()); // success might mean we are locking the same path
-    //              from multiple threads do_something(som_path); // locking was a success
+    //              from multiple threads do_something(some_path); // locking was a success
     //          }
     //          else // locking didnt succeed for some reason
     //          {
@@ -244,7 +232,7 @@ namespace mamba
     //              other reason, maybe a configuration option
     //          }
     //          some_more_work(some_path); // do this that the lock failed or not
-    //          return lock; // The locking ownership can be transfered to another function if
+    //          return lock; // The locking ownership can be transferred to another function if
     //          necessary
     //      }
     //
@@ -338,19 +326,7 @@ namespace mamba
         tl::expected<std::shared_ptr<LockFileOwner>, mamba_error> impl;
     };
 
-
     void split_package_extension(const std::string& file, std::string& name, std::string& extension);
-    fs::u8path strip_package_extension(const std::string& file);
-
-    template <class T>
-    inline bool vector_is_prefix(const std::vector<T>& prefix, const std::vector<T>& vec)
-    {
-        return vec.size() >= prefix.size()
-               && prefix.end() == std::mismatch(prefix.begin(), prefix.end(), vec.begin()).first;
-    }
-
-    tl::expected<std::string, mamba_error> encode_base64(std::string_view input);
-    tl::expected<std::string, mamba_error> decode_base64(std::string_view input);
 
     std::string
     quote_for_shell(const std::vector<std::string>& arguments, const std::string& shell = "");
@@ -385,7 +361,7 @@ namespace mamba
 
     struct WrappedCallOptions
     {
-        bool is_micromamba = false;
+        bool is_mamba_exe = false;
         bool dev_mode = false;
         bool debug_wrapper_scripts = false;
 

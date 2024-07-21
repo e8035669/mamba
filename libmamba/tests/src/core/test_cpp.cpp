@@ -10,21 +10,28 @@
 
 #include <doctest/doctest.h>
 
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/context.hpp"
-#include "mamba/core/environment.hpp"
 #include "mamba/core/fsutil.hpp"
 #include "mamba/core/history.hpp"
 #include "mamba/core/link.hpp"
-#include "mamba/core/match_spec.hpp"
 #include "mamba/core/output.hpp"
 #include "mamba/core/subdirdata.hpp"
 #include "mamba/util/build.hpp"
+#include "mamba/util/path_manip.hpp"
 
 #include "mambatests.hpp"
-#include "test_data.hpp"
 
 namespace mamba
 {
+
+    TEST_CASE("cache_name_from_url")
+    {
+        CHECK_EQ(cache_name_from_url("http://test.com/1234/"), "302f0a61");
+        CHECK_EQ(cache_name_from_url("http://test.com/1234/repodata.json"), "302f0a61");
+        CHECK_EQ(cache_name_from_url("http://test.com/1234/current_repodata.json"), "78a8cce9");
+    }
+
     // TEST(cpp_install, install)
     // {
     //     mambatests::context().output_params.verbosity = 3;
@@ -38,256 +45,6 @@ namespace mamba
     //     LinkPackage lp(pkg, prefix / "pkgs" , &tc);
     //     lp.execute();
     // }
-
-    TEST_SUITE("match_spec")
-    {
-        TEST_CASE("parse_version_build")
-        {
-            std::string v, b;
-            // >>> _parse_version_plus_build("=1.2.3 0")
-            // ('=1.2.3', '0')
-            // >>> _parse_version_plus_build("1.2.3=0")
-            // ('1.2.3', '0')
-            // >>> _parse_version_plus_build(">=1.0 , < 2.0 py34_0")
-            // ('>=1.0,<2.0', 'py34_0')
-            // >>> _parse_version_plus_build(">=1.0 , < 2.0 =py34_0")
-            // ('>=1.0,<2.0', 'py34_0')
-            // >>> _parse_version_plus_build("=1.2.3 ")
-            // ('=1.2.3', None)
-            // >>> _parse_version_plus_build(">1.8,<2|==1.7")
-            // ('>1.8,<2|==1.7', None)
-            // >>> _parse_version_plus_build("* openblas_0")
-            // ('*', 'openblas_0')
-            // >>> _parse_version_plus_build("* *")
-            // ('*', '*')
-            std::tie(v, b) = MatchSpec::parse_version_and_build("=1.2.3 0");
-            CHECK_EQ(v, "=1.2.3");
-            CHECK_EQ(b, "0");
-            std::tie(v, b) = MatchSpec::parse_version_and_build("=1.2.3=0");
-            CHECK_EQ(v, "=1.2.3");
-            CHECK_EQ(b, "0");
-            std::tie(v, b) = MatchSpec::parse_version_and_build(">=1.0 , < 2.0 py34_0");
-            CHECK_EQ(v, ">=1.0,<2.0");
-            CHECK_EQ(b, "py34_0");
-            std::tie(v, b) = MatchSpec::parse_version_and_build(">=1.0 , < 2.0 =py34_0");
-            CHECK_EQ(v, ">=1.0,<2.0");
-            CHECK_EQ(b, "py34_0");
-            std::tie(v, b) = MatchSpec::parse_version_and_build("=1.2.3 ");
-            CHECK_EQ(v, "=1.2.3");
-            CHECK_EQ(b, "");
-            std::tie(v, b) = MatchSpec::parse_version_and_build(">1.8,<2|==1.7");
-            CHECK_EQ(v, ">1.8,<2|==1.7");
-            CHECK_EQ(b, "");
-            std::tie(v, b) = MatchSpec::parse_version_and_build("* openblas_0");
-            CHECK_EQ(v, "*");
-            CHECK_EQ(b, "openblas_0");
-            std::tie(v, b) = MatchSpec::parse_version_and_build("* *");
-            CHECK_EQ(v, "*");
-            CHECK_EQ(b, "*");
-        }
-
-        TEST_CASE("parse")
-        {
-            ChannelContext channel_context{ mambatests::context() };
-            {
-                MatchSpec ms("xtensor==0.12.3", channel_context);
-                CHECK_EQ(ms.version, "0.12.3");
-                CHECK_EQ(ms.name, "xtensor");
-            }
-            {
-                MatchSpec ms("ipykernel", channel_context);
-                CHECK_EQ(ms.version, "");
-                CHECK_EQ(ms.name, "ipykernel");
-            }
-            {
-                MatchSpec ms("ipykernel ", channel_context);
-                CHECK_EQ(ms.version, "");
-                CHECK_EQ(ms.name, "ipykernel");
-            }
-            {
-                MatchSpec ms("numpy 1.7*", channel_context);
-                CHECK_EQ(ms.version, "1.7*");
-                CHECK_EQ(ms.name, "numpy");
-                CHECK_EQ(ms.conda_build_form(), "numpy 1.7*");
-                CHECK_EQ(ms.str(), "numpy=1.7");
-            }
-            {
-                MatchSpec ms("numpy[version='1.7|1.8']", channel_context);
-                // TODO!
-                // CHECK_EQ(ms.version, "1.7|1.8");
-                CHECK_EQ(ms.name, "numpy");
-                CHECK_EQ(ms.brackets["version"], "1.7|1.8");
-                CHECK_EQ(ms.str(), "numpy[version='1.7|1.8']");
-            }
-            {
-                MatchSpec ms("conda-forge/linux64::xtensor==0.12.3", channel_context);
-                CHECK_EQ(ms.version, "0.12.3");
-                CHECK_EQ(ms.name, "xtensor");
-                CHECK_EQ(ms.channel, "conda-forge/linux64");
-                CHECK_EQ(ms.optional, false);
-            }
-            {
-                MatchSpec ms("conda-forge::foo[build=3](target=blarg,optional)", channel_context);
-                CHECK_EQ(ms.version, "");
-                CHECK_EQ(ms.name, "foo");
-                CHECK_EQ(ms.channel, "conda-forge");
-                CHECK_EQ(ms.brackets["build"], "3");
-                CHECK_EQ(ms.parens["target"], "blarg");
-                CHECK_EQ(ms.optional, true);
-            }
-            {
-                MatchSpec ms("python[build_number=3]", channel_context);
-                CHECK_EQ(ms.name, "python");
-                CHECK_EQ(ms.brackets["build_number"], "3");
-                CHECK_EQ(ms.build_number, "3");
-            }
-            {
-                MatchSpec ms("python[build_number='<=3']", channel_context);
-                CHECK_EQ(ms.name, "python");
-                CHECK_EQ(ms.brackets["build_number"], "<=3");
-                CHECK_EQ(ms.build_number, "<=3");
-            }
-            {
-                MatchSpec ms(
-                    "https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2",
-                    channel_context
-                );
-                CHECK_EQ(ms.name, "_libgcc_mutex");
-                CHECK_EQ(ms.version, "0.1");
-                CHECK_EQ(ms.build_string, "conda_forge");
-                CHECK_EQ(
-                    ms.url,
-                    "https://conda.anaconda.org/conda-forge/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2"
-                );
-                CHECK_EQ(ms.fn, "_libgcc_mutex-0.1-conda_forge.tar.bz2");
-            }
-            {
-                MatchSpec ms(
-                    "/home/randomguy/Downloads/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2",
-                    channel_context
-                );
-                CHECK_EQ(ms.name, "_libgcc_mutex");
-                CHECK_EQ(ms.version, "0.1");
-                CHECK_EQ(ms.build_string, "conda_forge");
-#ifdef _WIN32
-                std::string driveletter = fs::absolute(fs::u8path("/")).string().substr(0, 1);
-                CHECK_EQ(
-                    ms.url,
-                    std::string("file://") + driveletter
-                        + ":/home/randomguy/Downloads/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2"
-                );
-#else
-                CHECK_EQ(
-                    ms.url,
-                    "file:///home/randomguy/Downloads/linux-64/_libgcc_mutex-0.1-conda_forge.tar.bz2"
-                );
-#endif
-                CHECK_EQ(ms.fn, "_libgcc_mutex-0.1-conda_forge.tar.bz2");
-            }
-            {
-                MatchSpec ms(
-                    "xtensor[url=file:///home/wolfv/Downloads/"
-                    "xtensor-0.21.4-hc9558a2_0.tar.bz2]",
-                    channel_context
-                );
-                CHECK_EQ(ms.name, "xtensor");
-                CHECK_EQ(
-                    ms.brackets["url"],
-                    "file:///home/wolfv/Downloads/xtensor-0.21.4-hc9558a2_0.tar.bz2"
-                );
-                CHECK_EQ(ms.url, "file:///home/wolfv/Downloads/xtensor-0.21.4-hc9558a2_0.tar.bz2");
-            }
-            {
-                MatchSpec ms("foo=1.0=2", channel_context);
-                CHECK_EQ(ms.conda_build_form(), "foo 1.0 2");
-                CHECK_EQ(ms.str(), "foo==1.0=2");
-            }
-            {
-                MatchSpec ms(
-                    "foo=1.0=2[md5=123123123, license=BSD-3, fn='test 123.tar.bz2']",
-                    channel_context
-                );
-                CHECK_EQ(ms.conda_build_form(), "foo 1.0 2");
-                CHECK_EQ(ms.str(), "foo==1.0=2[md5=123123123,license=BSD-3,fn='test 123.tar.bz2']");
-            }
-            {
-                MatchSpec ms(
-                    "foo=1.0=2[md5=123123123, license=BSD-3, fn='test 123.tar.bz2', url='abcdef']",
-                    channel_context
-                );
-                CHECK_EQ(ms.conda_build_form(), "foo 1.0 2");
-                CHECK_EQ(ms.str(), "foo==1.0=2[url=abcdef,md5=123123123,license=BSD-3]");
-            }
-            {
-                MatchSpec ms("libblas=*=*mkl", channel_context);
-                CHECK_EQ(ms.conda_build_form(), "libblas * *mkl");
-                // CHECK_EQ(ms.str(), "foo==1.0=2");
-            }
-            {
-                MatchSpec ms("libblas=0.15*", channel_context);
-                CHECK_EQ(ms.conda_build_form(), "libblas 0.15*");
-            }
-            {
-                MatchSpec ms("xtensor =0.15*", channel_context);
-                CHECK_EQ(ms.conda_build_form(), "xtensor 0.15*");
-                CHECK_EQ(ms.str(), "xtensor=0.15");
-            }
-            {
-                MatchSpec ms("numpy=1.20", channel_context);
-                CHECK_EQ(ms.str(), "numpy=1.20");
-            }
-
-            {
-                MatchSpec ms("conda-forge::tzdata", channel_context);
-                CHECK_EQ(ms.str(), "conda-forge::tzdata");
-            }
-            {
-                MatchSpec ms("conda-forge::noarch/tzdata", channel_context);
-                CHECK_EQ(ms.str(), "conda-forge::noarch/tzdata");
-            }
-            {
-                MatchSpec ms("pkgs/main::tzdata", channel_context);
-                CHECK_EQ(ms.str(), "pkgs/main::tzdata");
-            }
-            {
-                MatchSpec ms("pkgs/main/noarch::tzdata", channel_context);
-                CHECK_EQ(ms.str(), "pkgs/main/noarch::tzdata");
-            }
-            {
-                MatchSpec ms("conda-forge/noarch::tzdata[subdir=linux64]", channel_context);
-                CHECK_EQ(ms.str(), "conda-forge/noarch::tzdata");
-            }
-            {
-                MatchSpec ms("conda-forge::tzdata[subdir=linux64]", channel_context);
-                CHECK_EQ(ms.str(), "conda-forge/linux64::tzdata");
-            }
-        }
-
-        TEST_CASE("is_simple")
-        {
-            ChannelContext channel_context{ mambatests::context() };
-            {
-                MatchSpec ms("libblas", channel_context);
-                CHECK(ms.is_simple());
-            }
-            {
-                MatchSpec ms("libblas=12.9=abcdef", channel_context);
-                CHECK_FALSE(ms.is_simple());
-            }
-            {
-                MatchSpec ms("libblas=0.15*", channel_context);
-                CHECK_FALSE(ms.is_simple());
-            }
-            {
-                MatchSpec ms("libblas[version=12.2]", channel_context);
-                CHECK_FALSE(ms.is_simple());
-            }
-            {
-                MatchSpec ms("xtensor =0.15*", channel_context);
-                CHECK_FALSE(ms.is_simple());
-            }
-        }
-    }
 
     TEST_SUITE("history")
     {
@@ -392,18 +149,11 @@ namespace mamba
         {
             if (util::on_linux)
             {
-                auto home = env::expand_user("~");
+                auto home = fs::u8path(util::expand_home("~"));
                 CHECK_EQ(path::starts_with_home(home / "test" / "file.txt"), true);
                 CHECK_EQ(path::starts_with_home("~"), true);
                 CHECK_EQ(path::starts_with_home("/opt/bin"), false);
             }
-        }
-
-        TEST_CASE("expand_user")
-        {
-            fs::u8path pbefore = "/tmp/test/xyz.txt";
-            fs::u8path p = env::expand_user(pbefore);
-            CHECK_EQ(p, pbefore);
         }
 
         TEST_CASE("touch")
@@ -584,12 +334,6 @@ namespace mamba
         }
     }
 
-    namespace detail
-    {
-        // read the header that contains json like {"_mod": "...", ...}
-        tl::expected<subdir_metadata, mamba_error> read_metadata(const fs::u8path& file);
-    }
-
 #ifdef _WIN32
     std::chrono::system_clock::time_point filetime_to_unix_test(const fs::file_time_type& filetime)
     {
@@ -605,47 +349,47 @@ namespace mamba
 
     TEST_SUITE("subdirdata")
     {
-        TEST_CASE("parse_mod_etag")
+        TEST_CASE("parse_last_modified_etag")
         {
-            fs::u8path cache_folder = fs::u8path{ test_data_dir / "repodata_json_cache" };
-            auto mq = detail::read_metadata(cache_folder / "test_1.json");
+            fs::u8path cache_folder = fs::u8path{ mambatests::test_data_dir / "repodata_json_cache" };
+            auto mq = SubdirMetadata::read(cache_folder / "test_1.json");
             CHECK(mq.has_value());
             auto j = mq.value();
-            CHECK_EQ(j.mod, "Fri, 11 Feb 2022 13:52:44 GMT");
+            CHECK_EQ(j.last_modified(), "Fri, 11 Feb 2022 13:52:44 GMT");
             CHECK_EQ(
-                j.url,
+                j.url(),
                 "file:///Users/wolfvollprecht/Programs/mamba/mamba/tests/channel_a/linux-64/repodata.json"
             );
 
-            j = detail::read_metadata(cache_folder / "test_2.json").value();
-            CHECK_EQ(j.mod, "Fri, 11 Feb 2022 13:52:44 GMT");
+            j = SubdirMetadata::read(cache_folder / "test_2.json").value();
+            CHECK_EQ(j.last_modified(), "Fri, 11 Feb 2022 13:52:44 GMT");
             CHECK_EQ(
-                j.url,
+                j.url(),
                 "file:///Users/wolfvollprecht/Programs/mamba/mamba/tests/channel_a/linux-64/repodata.json"
             );
 
-            j = detail::read_metadata(cache_folder / "test_5.json").value();
-            CHECK_EQ(j.mod, "Fri, 11 Feb 2022 13:52:44 GMT");
+            j = SubdirMetadata::read(cache_folder / "test_5.json").value();
+            CHECK_EQ(j.last_modified(), "Fri, 11 Feb 2022 13:52:44 GMT");
             CHECK_EQ(
-                j.url,
+                j.url(),
                 "file:///Users/wolfvollprecht/Programs/mamba/mamba/tests/channel_a/linux-64/repodata.json"
             );
 
-            j = detail::read_metadata(cache_folder / "test_4.json").value();
-            CHECK_EQ(j.cache_control, "{{}}\",,,\"");
-            CHECK_EQ(j.etag, "\n\n\"\"randome ecx,,ssd\n,,\"");
-            CHECK_EQ(j.mod, "Fri, 11 Feb 2022 13:52:44 GMT");
+            j = SubdirMetadata::read(cache_folder / "test_4.json").value();
+            CHECK_EQ(j.cache_control(), "{{}}\",,,\"");
+            CHECK_EQ(j.etag(), "\n\n\"\"randome ecx,,ssd\n,,\"");
+            CHECK_EQ(j.last_modified(), "Fri, 11 Feb 2022 13:52:44 GMT");
             CHECK_EQ(
-                j.url,
+                j.url(),
                 "file:///Users/wolfvollprecht/Programs/mamba/mamba/tests/channel_a/linux-64/repodata.json"
             );
 
-            mq = detail::read_metadata(cache_folder / "test_3.json");
+            mq = SubdirMetadata::read(cache_folder / "test_3.json");
             CHECK(mq.has_value() == false);
 
-            j = detail::read_metadata(cache_folder / "test_6.json").value();
-            CHECK_EQ(j.mod, "Thu, 02 Apr 2020 20:21:27 GMT");
-            CHECK_EQ(j.url, "https://conda.anaconda.org/intake/osx-arm64");
+            j = SubdirMetadata::read(cache_folder / "test_6.json").value();
+            CHECK_EQ(j.last_modified(), "Thu, 02 Apr 2020 20:21:27 GMT");
+            CHECK_EQ(j.url(), "https://conda.anaconda.org/intake/osx-arm64");
 
             auto state_file = cache_folder / "test_7.state.json";
             // set file_mtime
@@ -676,13 +420,12 @@ namespace mamba
                 ofs << jstate.dump(4);
             }
 
-            j = detail::read_metadata(cache_folder / "test_7.json").value();
-            CHECK_EQ(j.cache_control, "something");
-            CHECK_EQ(j.etag, "something else");
-            CHECK_EQ(j.mod, "Fri, 11 Feb 2022 13:52:44 GMT");
-            CHECK_EQ(j.url, "https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst");
-            CHECK_EQ(j.has_zst.value().value, true);
-            CHECK_EQ(j.has_zst.value().last_checked, parse_utc_timestamp("2023-01-06T16:33:06Z"));
+            j = SubdirMetadata::read(cache_folder / "test_7.json").value();
+            CHECK_EQ(j.cache_control(), "something");
+            CHECK_EQ(j.etag(), "something else");
+            CHECK_EQ(j.last_modified(), "Fri, 11 Feb 2022 13:52:44 GMT");
+            CHECK_EQ(j.url(), "https://conda.anaconda.org/conda-forge/noarch/repodata.json.zst");
+            CHECK_EQ(j.has_zst(), false);
         }
     }
 }  // namespace mamba

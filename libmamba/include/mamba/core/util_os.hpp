@@ -38,19 +38,9 @@ namespace mamba
 
     void run_as_admin(const std::string& args);
     bool enable_long_paths_support(bool force, Palette palette = Palette::no_color());
-    std::string windows_version();
-    std::string macos_version();
-    std::string linux_version();
 
     void init_console();
     void reset_console();
-
-#ifdef _WIN32
-    std::string to_utf8(const wchar_t* windows_unicode_text, size_t size);
-    std::string to_utf8(const wchar_t* windows_unicode_text);
-    std::string to_utf8(const std::wstring& windows_unicode_text);
-    std::wstring to_windows_unicode(const std::string_view utf8_text);
-#endif
 
     /* Test whether a given `std::ostream` object refers to a terminal. */
     bool is_atty(const std::ostream& stream);
@@ -65,8 +55,6 @@ namespace mamba
     int get_console_height();
 
     void codesign(const fs::u8path& path, bool verbose = false);
-
-    std::string fix_win_path(const std::string& path);
 }
 
 #endif

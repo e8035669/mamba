@@ -6,16 +6,19 @@
 
 #include <string>
 
+#include "mamba/util/path_manip.hpp"
+
 #ifdef _WIN32
 #include <shlobj.h>
 #include <windows.h>
+
+#include "mamba/util/os_win.hpp"
 #endif
 
 #include "mamba/core/context.hpp"
 #include "mamba/core/output.hpp"
 #include "mamba/core/transaction_context.hpp"
 #include "mamba/util/string.hpp"
-
 
 namespace mamba
 {
@@ -63,11 +66,10 @@ namespace mamba
             IPersistFile* pPersistFile = nullptr;
 
             HRESULT hres;
-            LOG_DEBUG << "Creating shortcut with "
-                      << "\n  Path: " << path << "\n  Description: " << description
-                      << "\n  Filename: " << filename << "\n  Arguments: " << arguments
-                      << "\n  Workdir: " << work_dir << "\n  Icon Path: " << icon_path
-                      << "\n  Icon Index: " << icon_index;
+            LOG_DEBUG << "Creating shortcut with " << "\n  Path: " << path
+                      << "\n  Description: " << description << "\n  Filename: " << filename
+                      << "\n  Arguments: " << arguments << "\n  Workdir: " << work_dir
+                      << "\n  Icon Path: " << icon_path << "\n  Icon Index: " << icon_index;
             try
             {
                 hres = CoInitialize(nullptr);
@@ -169,30 +171,6 @@ namespace mamba
             CoUninitialize();
         }
 
-        const std::map<std::string, KNOWNFOLDERID> knownfolders = {
-            { "programs", FOLDERID_Programs },       { "profile", FOLDERID_Profile },
-            { "documents", FOLDERID_Documents },     { "roamingappdata", FOLDERID_RoamingAppData },
-            { "programdata", FOLDERID_ProgramData }, { "localappdata", FOLDERID_LocalAppData },
-        };
-
-        fs::u8path get_folder(const std::string& id)
-        {
-            wchar_t* localAppData;
-            HRESULT hres;
-
-            hres = SHGetKnownFolderPath(knownfolders.at(id), KF_FLAG_DONT_VERIFY, nullptr, &localAppData);
-
-            if (FAILED(hres))
-            {
-                throw std::runtime_error("Could not retrieve known folder");
-            }
-
-            std::wstring tmp(localAppData);
-            fs::u8path res(tmp);
-            CoTaskMemFree(localAppData);
-            return res;
-        }
-
         void remove_shortcut(const fs::u8path& filename)
         {
             try
@@ -234,12 +212,7 @@ namespace mamba
             distribution_name[0] = util::to_upper(distribution_name[0]);
         }
 
-        auto to_forward_slash = [](const fs::u8path& p)
-        {
-            std::string ps = p.string();
-            util::replace_all(ps, "\\", "/");
-            return ps;
-        };
+        auto to_forward_slash = [](const fs::u8path& p) { return util::path_to_posix(p.string()); };
 
         auto platform_split = util::split(ctx.platform, "-");
         std::string platform_bitness;
@@ -264,8 +237,12 @@ namespace mamba
         };
 
 #ifdef _WIN32
-        vars["${PERSONALDIR}"] = to_forward_slash(win::get_folder("documents"));
-        vars["${USERPROFILE}"] = to_forward_slash(win::get_folder("profile"));
+        vars["${PERSONALDIR}"] = util::path_to_posix(
+            util::get_windows_known_user_folder(util::WindowsKnowUserFolder::Documents)
+        );
+        vars["${USERPROFILE}"] = util::path_to_posix(
+            util::get_windows_known_user_folder(util::WindowsKnowUserFolder::Profile)
+        );
 #endif
 
         for (auto& [key, val] : vars)
@@ -328,7 +305,11 @@ namespace mamba
                 { cwp_path.string(), target_prefix.string(), env_pyw.string() }
             );
 
-            fs::u8path target_dir = win::get_folder("programs") / menu_name;
+            auto target_dir = fs::u8path(util::get_windows_known_user_folder(
+                                  util::WindowsKnowUserFolder::Programs
+                              ))
+                              / menu_name;
+
             if (!fs::exists(target_dir))
             {
                 fs::create_directories(target_dir);

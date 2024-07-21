@@ -7,16 +7,16 @@
 #ifndef MAMBA_API_UPDATE_HPP
 #define MAMBA_API_UPDATE_HPP
 
-#include <string>
-#include <vector>
-
-#include "mamba/core/mamba_fs.hpp"
-#include "mamba/core/query.hpp"
-
-
 namespace mamba
 {
-    void update(Configuration& config, bool update_all = false, bool prune = false);
+    class Configuration;
+
+    void update(
+        Configuration& config,
+        bool update_all = false,
+        bool prune_deps = false,
+        bool remove_not_specified = false
+    );
 }
 
 #endif

@@ -8,50 +8,11 @@
 #include <string_view>
 #include <utility>
 
-#include <nlohmann/json.hpp>
-
 #include "mamba/specs/repo_data.hpp"
-
-NLOHMANN_JSON_NAMESPACE_BEGIN
-template <typename T>
-struct adl_serializer<std::optional<T>>
-{
-    static void to_json(json& j, const std::optional<T>& opt)
-    {
-        if (opt.has_value())
-        {
-            j = opt.value();
-        }
-        else
-        {
-            j = nullptr;
-        }
-    }
-
-    static void from_json(const json& j, std::optional<T>& opt)
-    {
-        if (!j.is_null())
-        {
-            opt = j.template get<T>();
-        }
-        else
-        {
-            opt = std::nullopt;
-        }
-    }
-};
-NLOHMANN_JSON_NAMESPACE_END
+#include "mamba/util/json.hpp"
 
 namespace mamba::specs
 {
-    NLOHMANN_JSON_SERIALIZE_ENUM(
-        NoArchType,
-        {
-            { NoArchType::Generic, "generic" },
-            { NoArchType::Python, "python" },
-        }
-    )
-
     void to_json(nlohmann::json& j, const RepoDataPackage& p)
     {
         j["name"] = p.name;
@@ -76,26 +37,14 @@ namespace mamba::specs
         j["timestamp"] = p.timestamp;
     }
 
-    namespace
-    {
-        template <typename Json, std::size_t N, typename T>
-        void deserialize_maybe_missing(Json&& j, const char (&name)[N], T& t)
-        {
-            if (j.contains(name))
-            {
-                t = std::forward<Json>(j)[name].template get<T>();
-            }
-            else
-            {
-                t = {};
-            }
-        }
-    }
-
     void from_json(const nlohmann::json& j, RepoDataPackage& p)
     {
+        using mamba::util::deserialize_maybe_missing;
+
         p.name = j.at("name");
-        p.version = Version::parse(j.at("version").template get<std::string_view>());
+        p.version = Version::parse(j.at("version").template get<std::string_view>())
+                        .or_else([](ParseError&& error) { throw std::move(error); })
+                        .value();
         p.build_string = j.at("build");
         p.build_number = j.at("build_number");
         deserialize_maybe_missing(j, "subdir", p.subdir);
@@ -165,6 +114,7 @@ namespace mamba::specs
 
     void from_json(const nlohmann::json& j, RepoData& data)
     {
+        using mamba::util::deserialize_maybe_missing;
         deserialize_maybe_missing(j, "version", data.version);
         deserialize_maybe_missing(j, "info", data.info);
         deserialize_maybe_missing(j, "packages", data.packages);

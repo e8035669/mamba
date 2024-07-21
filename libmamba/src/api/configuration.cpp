@@ -15,11 +15,14 @@
 
 #include "mamba/api/configuration.hpp"
 #include "mamba/api/install.hpp"
-#include "mamba/core/environment.hpp"
 #include "mamba/core/fsutil.hpp"
 #include "mamba/core/output.hpp"
-#include "mamba/core/package_download.hpp"
+#include "mamba/core/package_fetcher.hpp"
+#include "mamba/core/util.hpp"
+#include "mamba/core/util_os.hpp"
 #include "mamba/util/build.hpp"
+#include "mamba/util/environment.hpp"
+#include "mamba/util/path_manip.hpp"
 #include "mamba/util/string.hpp"
 
 namespace mamba
@@ -44,7 +47,7 @@ namespace mamba
 
             for (const auto& env_var : m_env_var_names)
             {
-                if (env::get(env_var))
+                if (util::get_env(env_var))
                 {
                     return true;
                 }
@@ -71,7 +74,6 @@ namespace mamba
 
             return m_rc_configured && !m_config->context().src_params.no_rc;
         }
-
 
         bool ConfigurableImplBase::is_config_loading() const
         {
@@ -273,7 +275,7 @@ namespace mamba
         {
             for (const auto& ev : p_impl->m_env_var_names)
             {
-                env::unset(ev);
+                util::unset_env(ev);
             }
         }
         return std::move(*this);
@@ -383,15 +385,24 @@ namespace mamba
             // Bail out early
             return s;
         }
-        // Match $$ and ${var} where var does not contains YAML special charaters
-        std::regex env_var_re(R"(\$(?:\$|\{([^\}'\"\s]+)\}))");
+        std::regex env_var_re(R"(\$(\{\w+\}|\w+))");
         for (auto matches = std::sregex_iterator(s.begin(), s.end(), env_var_re);
              matches != std::sregex_iterator();
              ++matches)
         {
             std::smatch match = *matches;
-            auto var = match[1].str();
-            auto val = var.empty() ? "$" : env::get(var);
+            auto var = match[0].str();
+            if (mamba::util::starts_with(var, "${"))
+            {
+                // strip ${ and }
+                var = var.substr(2, var.size() - 3);
+            }
+            else
+            {
+                // strip $
+                var = var.substr(1);
+            }
+            auto val = util::get_env(var);
             if (val)
             {
                 s.replace(match[0].first, match[0].second, val.value());
@@ -521,7 +532,7 @@ namespace mamba
             auto& spec_file_env_name = config.at("spec_file_env_name");
             auto& spec_file_name = spec_file_env_name.value<std::string>();
 
-            // Allow spec file environment name to be overriden by target prefix
+            // Allow spec file environment name to be overridden by target prefix
             if (env_name.cli_configured() && config.at("target_prefix").cli_configured())
             {
                 LOG_ERROR << "Cannot set both prefix and env name";
@@ -580,7 +591,7 @@ namespace mamba
                 bool use_fallback = config.at("use_target_prefix_fallback").value<bool>();
                 if (use_fallback)
                 {
-                    prefix = std::getenv("CONDA_PREFIX") ? std::getenv("CONDA_PREFIX") : "";
+                    prefix = util::get_env("CONDA_PREFIX").value_or("");
                 }
             }
 
@@ -591,7 +602,10 @@ namespace mamba
 #endif
             if (!prefix.empty())
             {
-                prefix = util::rstrip(fs::weakly_canonical(env::expand_user(prefix)).string(), sep);
+                prefix = util::rstrip(
+                    fs::weakly_canonical(util::expand_home(prefix.string())).string(),
+                    sep
+                );
             }
 
             if ((prefix == root_prefix) && config.at("create_base").value<bool>())
@@ -600,67 +614,125 @@ namespace mamba
             }
         }
 
+        auto validate_existing_root_prefix(const fs::u8path& candidate) -> expected_t<fs::u8path>
+        {
+            auto prefix = fs::u8path(util::expand_home(candidate.string()));
+
+            if (prefix.empty())
+            {
+                return make_unexpected("Empty root prefix.", mamba_error_code::incorrect_usage);
+            }
+
+            if (!fs::exists(prefix / "pkgs")           //
+                || !fs::exists(prefix / "conda-meta")  //
+                || !fs::exists(prefix / "envs"))
+            {
+                return make_unexpected(
+                    fmt::format(R"(Path "{}" is not an existing root prefix.)", prefix.string()),
+                    mamba_error_code::incorrect_usage
+                );
+            }
+
+            return { fs::weakly_canonical(std::move(prefix)) };
+        }
+
+        auto validate_root_prefix(const fs::u8path& candidate) -> expected_t<fs::u8path>
+        {
+            auto prefix = fs::u8path(util::expand_home(candidate.string()));
+
+            if (prefix.empty())
+            {
+                return make_unexpected("Empty root prefix.", mamba_error_code::incorrect_usage);
+            }
+
+            if (fs::exists(prefix))
+            {
+                if (fs::is_directory(prefix))
+                {
+                    if (auto maybe_prefix = validate_existing_root_prefix(prefix);
+                        maybe_prefix.has_value())
+                    {
+                        return maybe_prefix;
+                    }
+
+                    return make_unexpected(
+                        fmt::format(
+                            R"(Could not use default root_prefix "{}":)"
+                            R"( Directory exists, is not empty and not a conda prefix.)",
+                            prefix.string()
+                        ),
+                        mamba_error_code::incorrect_usage
+                    );
+                }
+                return make_unexpected(
+                    fmt::format(
+                        R"(Could not use default root_prefix "{}": Not a directory.)",
+                        prefix.string()
+                    ),
+                    mamba_error_code::incorrect_usage
+                );
+            }
+
+            return { fs::weakly_canonical(std::move(prefix)) };
+        }
+
+        /**
+         * In mamba 1.0, only micromamba was using this location.
+         */
+        auto default_root_prefix_v1() -> fs::u8path
+        {
+            return fs::u8path(util::user_home_dir()) / "micromamba";
+        }
+
+        /**
+         * In mamba 2.0, we change the default location.
+         * We unconditionally name the subfolder "mamba" for compatibility between ``mamba``
+         * and ``micromamba``, as well as consistency with ``MAMBA_`` environment variables.
+         */
+        auto default_root_prefix_v2() -> fs::u8path
+        {
+            return fs::u8path(util::user_data_dir()) / "mamba";
+        }
+
         void root_prefix_hook(Configuration& config, fs::u8path& prefix)
         {
             auto& env_name = config.at("env_name");
 
             if (prefix.empty())
             {
-                if (env::get("MAMBA_DEFAULT_ROOT_PREFIX"))
+                if (util::get_env("MAMBA_DEFAULT_ROOT_PREFIX"))
                 {
-                    prefix = env::get("MAMBA_DEFAULT_ROOT_PREFIX").value();
+                    prefix = util::get_env("MAMBA_DEFAULT_ROOT_PREFIX").value();
                     LOG_WARNING << unindent(R"(
                                     'MAMBA_DEFAULT_ROOT_PREFIX' is meant for testing purpose.
                                     Consider using 'MAMBA_ROOT_PREFIX' instead)");
                 }
                 else
                 {
-                    prefix = env::home_directory() / "micromamba";
+                    validate_existing_root_prefix(default_root_prefix_v1())
+                        .or_else([](const auto& /* error */)
+                                 { return validate_root_prefix(default_root_prefix_v2()); })
+                        .transform([&](fs::u8path&& p) { prefix = std::move(p); })
+                        .or_else([](mamba_error&& error) { throw std::move(error); });
                 }
 
                 if (env_name.configured())
                 {
-                    LOG_WARNING << "'root_prefix' set with default value: " << prefix.string();
-                }
-
-                if (fs::exists(prefix))
-                {
-                    if (fs::is_directory(prefix))
-                    {
-                        if (!fs::is_empty(prefix)
-                            && (!(
-                                fs::exists(prefix / "pkgs") || fs::exists(prefix / "conda-meta")
-                                || fs::exists(prefix / "envs")
-                            )))
-                        {
-                            throw std::runtime_error(fmt::format(
-                                "Could not use default 'root_prefix': {}: Directory exists, is not empty and not a conda prefix.",
-                                prefix.string()
-                            ));
-                        }
-                    }
-                    else
-                    {
-                        throw std::runtime_error(fmt::format(
-                            "Could not use default 'root_prefix': {}: File is not a directory.",
-                            prefix.string()
-                        ));
-                    }
-                }
-
-                if (env_name.configured())
-                {
-                    LOG_INFO << unindent(R"(
-                            You have not set the 'root_prefix' environment variable.
-                            To permanently modify the root prefix location, either:
-                            - set the 'MAMBA_ROOT_PREFIX' environment variable
-                            - use the '-r,--root-prefix' CLI option
-                            - use 'micromamba shell init ...' to initialize your shell
-                                (then restart or source the contents of the shell init script))");
+                    const auto exe_name = get_self_exe_path().stem().string();
+                    LOG_WARNING << "You have not set the root prefix environment variable.\n"
+                                   "To permanently modify the root prefix location, either:\n"
+                                   "  - set the 'MAMBA_ROOT_PREFIX' environment variable\n"
+                                   "  - use the '-r,--root-prefix' CLI option\n"
+                                   "  - use '"
+                                << exe_name
+                                << " shell init ...' to initialize your shell\n"
+                                   "    (then restart or source the contents of the shell init script)\n"
+                                   "Continuing with default value: "
+                                << '"' << prefix.string() << '"';
                 }
             }
 
-            prefix = fs::weakly_canonical(env::expand_user(prefix));
+            prefix = fs::weakly_canonical(util::expand_home(prefix.string()));
         }
 
         void rc_loading_hook(Configuration& config, const RCConfigLevel& level)
@@ -764,8 +836,10 @@ namespace mamba
             }
             else if (expect_existing)
             {
+                const auto exe_name = get_self_exe_path().stem().string();
                 LOG_ERROR << "No prefix found at: " << prefix.string();
-                LOG_ERROR << "Environment must first be created with \"micromamba create -n {env_name} ...\"";
+                LOG_ERROR << "Environment must first be created with \"" << exe_name
+                          << " create -n {env_name} ...\"";
                 throw std::runtime_error("Aborting.");
             }
         }
@@ -781,7 +855,7 @@ namespace mamba
                 }
                 for (auto& f : files)
                 {
-                    f = env::expand_user(f);
+                    f = util::expand_home(f.string());
                     if (!fs::exists(f))
                     {
                         LOG_ERROR << "Configuration file specified but does not exist at '"
@@ -797,6 +871,15 @@ namespace mamba
             if (value)
             {
                 LOG_WARNING << "Experimental mode enabled";
+            }
+        }
+
+        // cf. https://github.com/openSUSE/libsolv/issues/562 to track corresponding issue
+        void not_supported_option_hook(bool& value)
+        {
+            if (!value)
+            {
+                LOG_WARNING << "Parsing with libsolv does not support repodata_version 2";
             }
         }
 
@@ -845,7 +928,7 @@ namespace mamba
         {
             for (auto& d : dirs)
             {
-                d = fs::weakly_canonical(env::expand_user(d)).string();
+                d = fs::weakly_canonical(util::expand_home(d.string())).string();
                 if (fs::exists(d) && !fs::is_directory(d))
                 {
                     LOG_ERROR << "Env dir specified is not a directory: " << d.string();
@@ -856,10 +939,12 @@ namespace mamba
 
         std::vector<fs::u8path> fallback_pkgs_dirs_hook(const Context& context)
         {
-            std::vector<fs::u8path> paths = { context.prefix_params.root_prefix / "pkgs",
-                                              env::home_directory() / ".mamba" / "pkgs" };
+            std::vector<fs::u8path> paths = {
+                context.prefix_params.root_prefix / "pkgs",
+                fs::u8path(util::user_home_dir()) / ".mamba" / "pkgs",
+            };
 #ifdef _WIN32
-            auto appdata = env::get("APPDATA");
+            auto appdata = util::get_env("APPDATA");
             if (appdata)
             {
                 paths.push_back(fs::u8path(appdata.value()) / ".mamba" / "pkgs");
@@ -872,7 +957,7 @@ namespace mamba
         {
             for (auto& d : dirs)
             {
-                d = fs::weakly_canonical(env::expand_user(d)).string();
+                d = fs::weakly_canonical(util::expand_home(d.string())).string();
                 if (fs::exists(d) && !fs::is_directory(d))
                 {
                     LOG_ERROR << "Packages dir specified is not a directory: " << d.string();
@@ -894,7 +979,7 @@ namespace mamba
 
         void extract_threads_hook(const Context& context)
         {
-            DownloadExtractSemaphore::set_max(context.threads_params.extract_threads);
+            PackageFetcherSemaphore::set_max(context.threads_params.extract_threads);
         }
     }
 
@@ -925,7 +1010,7 @@ namespace mamba
     {
         if (!config.at("root_prefix").configured() || force)
         {
-            env::set("MAMBA_ROOT_PREFIX", get_conda_root_prefix().string());
+            util::set_env("MAMBA_ROOT_PREFIX", get_conda_root_prefix().string());
         }
     }
 
@@ -988,7 +1073,14 @@ namespace mamba
                 out << YAML::BeginSeq;
                 for (std::size_t n = 0; n < value.size(); ++n)
                 {
-                    print_node(out, value[n], source[n], show_source);
+                    if (source.IsSequence() && (source.size() == value.size()))
+                    {
+                        print_node(out, value[n], source[n], show_source);
+                    }
+                    else
+                    {
+                        print_node(out, value[n], source, show_source);
+                    }
                 }
                 out << YAML::EndSeq;
             }
@@ -1168,7 +1260,7 @@ namespace mamba
                    .set_env_var_names({ "CONDA_SUBDIR", "MAMBA_PLATFORM" })
                    .description("The platform description")
                    .long_description(unindent(R"(
-                        The plaftorm description points what channels
+                        The platform description points what channels
                         subdir/platform have to be fetched for package solving.
                         This can be 'linux-64' or similar.)")));
 
@@ -1200,6 +1292,16 @@ namespace mamba
                         under active development and not stable yet.)"))
                    .set_post_merge_hook(detail::experimental_hook));
 
+        insert(Configurable("experimental_repodata_parsing", &m_context.experimental_repodata_parsing)
+                   .group("Basic")
+                   .description(  //
+                       "Enable experimental parsing of `repodata.json` using simdjson.\n"
+                       "Default is `true`. `false` means libsolv is used.\n"
+                   )
+                   .set_rc_configurable()
+                   .set_env_var_names()
+                   .set_post_merge_hook(detail::not_supported_option_hook));
+
         insert(Configurable("debug", &m_context.debug)
                    .group("Basic")
                    .set_env_var_names()
@@ -1220,6 +1322,7 @@ namespace mamba
                    .needs({ "file_specs" })
                    .long_description(unindent(R"(
                         The list of channels where the packages will be searched for.
+                        Note that '-c local' allows using locally built packages.
                         See also 'channel_priority'.)"))
                    .set_post_merge_hook<decltype(m_context.channels)>(
                        [&](decltype(m_context.channels)& value)
@@ -1246,14 +1349,28 @@ namespace mamba
                    .set_rc_configurable()
                    .set_env_var_names()
                    .description("Custom channels")
-                   .long_description("A dictionary with name: url to use for custom channels."));
+                   .long_description(  //
+                       "A dictionary with name: url to use for custom channels.\n"
+                   ));
 
         insert(Configurable("custom_multichannels", &m_context.custom_multichannels)
                    .group("Channels")
                    .set_rc_configurable()
                    .description("Custom multichannels")
-                   .long_description(
-                       "A dictionary with name: list of names/urls to use for custom multichannels."
+                   .long_description(  //
+                       "A dictionary where keys are multi channels names, and values are a list "
+                       "of corresponding names / urls / file paths to use.\n"
+                   )
+                   .needs({ "default_channels", "target_prefix", "root_prefix" }));
+
+        insert(Configurable("mirrored_channels", &m_context.mirrored_channels)
+                   .group("Channels")
+                   .set_rc_configurable()
+                   .set_env_var_names()
+                   .description("Mirrored channels")
+                   .long_description(  //
+                       "A dictionary where keys are channels names, and values are a list "
+                       "of mirrors urls to use.\n"
                    ));
 
         insert(Configurable("override_channels_enabled", &m_context.override_channels_enabled)
@@ -1265,7 +1382,10 @@ namespace mamba
         insert(Configurable("repodata_use_zst", &m_context.repodata_use_zst)
                    .group("Repodata")
                    .set_rc_configurable()
-                   .description("Use zstd encoded repodata when fetching"));
+                   .description("Use zstd encoded repodata when fetching ("
+                                "Note that this doesn't apply when fetching from an OCI registry - "
+                                "using `mirrored_channels` - since compressed repodata is "
+                                "automatically used when present.)\n"));
 
 
         insert(Configurable("repodata_has_zst", &m_context.repodata_has_zst)
@@ -1280,8 +1400,8 @@ namespace mamba
                    .set_env_var_names()
                    .description("Path (file or directory) SSL certificate(s)")
                    .long_description(unindent(R"(
-                        Path (file or directory) SSL certificate(s) to use whe
-                        'ssl_verify' in turned on but not set with path to certs.
+                        Path (file or directory) SSL certificate(s) to use when
+                        'ssl_verify' is turned on but not set with path to certs.
                         WARNING: overrides 'ssl_verify' if provided and 'ssl_verify'
                         also contains a path to SSL certificates.)")));
 
@@ -1373,7 +1493,12 @@ namespace mamba
                         With channel priority disabled, package version takes precedence, and the
                         configured priority of channels is used only to break ties. In
                         previous versions of conda, this parameter was configured as either
-                        True or False. True is now an alias to 'flexible'.)")));
+                        True or False. True is now an alias to 'flexible'.)"))
+                   .set_post_merge_hook<ChannelPriority>(
+                       [&](ChannelPriority& value) {
+                           m_context.solver_flags.strict_repo_priority = (value == ChannelPriority::Strict);
+                       }
+                   ));
 
         insert(Configurable("explicit_install", false)
                    .group("Solver")
@@ -1419,18 +1544,41 @@ namespace mamba
                    .group("Solver")
                    .description("Freeze already installed dependencies"));
 
-        insert(
-            Configurable("force_reinstall", false).group("Solver").description("Force reinstall of package")
-        );
-
         insert(Configurable("no_deps", false)
                    .group("Solver")
                    .description("Do not install dependencies. This WILL lead to broken environments "
-                                "and inconsistent behavior. Use at your own risk"));
+                                "and inconsistent behavior. Use at your own risk")
+                   .set_post_merge_hook<bool>([&](bool& value)
+                                              { m_context.solver_flags.keep_dependencies = !value; }));
 
-        insert(
-            Configurable("only_deps", false).group("Solver").description("Only install dependencies")
-        );
+        insert(Configurable("only_deps", false)
+                   .group("Solver")
+                   .description("Only install dependencies")
+                   .set_post_merge_hook<bool>([&](bool& value)
+                                              { m_context.solver_flags.keep_user_specs = !value; }));
+
+        insert(Configurable("force_reinstall", &m_context.solver_flags.force_reinstall)
+                   .group("Solver")
+                   .description("Force reinstall of package"));
+
+        insert(Configurable("allow_uninstall", &m_context.solver_flags.allow_uninstall)
+                   .group("Solver")
+                   .set_rc_configurable()
+                   .set_env_var_names()
+                   .description("Allow uninstall when installing or updating packages. Default is true."
+                   ));
+
+        insert(Configurable("allow_downgrade", &m_context.solver_flags.allow_downgrade)
+                   .group("Solver")
+                   .set_rc_configurable()
+                   .set_env_var_names()
+                   .description("Allow downgrade when installing packages. Default is false."));
+
+        insert(Configurable("order_solver_request", &m_context.solver_flags.order_request)
+                   .group("Solver")
+                   .set_rc_configurable()
+                   .set_env_var_names()
+                   .description("Order the solver request specs to get a deterministic solution."));
 
         insert(Configurable("categories", std::vector<std::string>({ "main" }))
                    .group("Solver")
@@ -1440,19 +1588,6 @@ namespace mamba
                    .group("Solver")
                    .set_env_var_names()
                    .description("If solve fails, try to fetch updated repodata"));
-
-        insert(Configurable("allow_uninstall", &m_context.allow_uninstall)
-                   .group("Solver")
-                   .set_rc_configurable()
-                   .set_env_var_names()
-                   .description("Allow uninstall when installing or updating packages. Default is true."
-                   ));
-
-        insert(Configurable("allow_downgrade", &m_context.allow_downgrade)
-                   .group("Solver")
-                   .set_rc_configurable()
-                   .set_env_var_names()
-                   .description("Allow downgrade when installing packages. Default is false."));
 
         // Extract, Link & Install
         insert(Configurable("download_threads", &m_context.threads_params.download_threads)
@@ -1543,10 +1678,22 @@ namespace mamba
                    .group("Extract, Link & Install")
                    .set_rc_configurable()
                    .set_env_var_names()
-                   .description("Run verifications on packages signatures")
+                   .description(  //
+                       "Run verifications on packages signatures.\n"
+                       "This is still experimental and may not be stable yet.\n"
+                   )
                    .long_description(unindent(R"(
                         Spend extra time validating package contents. It consists of running
                         cryptographic verifications on channels and packages metadata.)")));
+
+        insert(Configurable("trusted_channels", &m_context.validation_params.trusted_channels)
+                   .group("Extract, Link & Install")
+                   .set_rc_configurable()
+                   .set_env_var_names()
+                   .description(  //
+                       "The list of trusted channels allowing artifacts verification.\n"
+                       "See `verify-artifacts` for more details.\n"
+                   ));
 
         insert(Configurable("lock_timeout", &m_context.lock_timeout)
                    .group("Extract, Link & Install")
@@ -1826,28 +1973,31 @@ namespace mamba
                                          context.prefix_params.root_prefix / ".mambarc" };
 
         std::vector<fs::u8path> conda_user = {
-            env::user_config_dir() / "../conda/.condarc",
-            env::user_config_dir() / "../conda/condarc",
-            env::user_config_dir() / "../conda/condarc.d",
-            env::home_directory() / ".conda/.condarc",
-            env::home_directory() / ".conda/condarc",
-            env::home_directory() / ".conda/condarc.d",
-            env::home_directory() / ".condarc",
+            fs::u8path(util::user_config_dir()) / "conda/.condarc",
+            fs::u8path(util::user_config_dir()) / "conda/condarc",
+            fs::u8path(util::user_config_dir()) / "conda/condarc.d",
+            fs::u8path(util::user_home_dir()) / ".conda/.condarc",
+            fs::u8path(util::user_home_dir()) / ".conda/condarc",
+            fs::u8path(util::user_home_dir()) / ".conda/condarc.d",
+            fs::u8path(util::user_home_dir()) / ".condarc",
         };
-        if (env::get("CONDARC"))
+        if (util::get_env("CONDARC"))
         {
-            conda_user.push_back(fs::u8path(env::get("CONDARC").value()));
+            conda_user.push_back(fs::u8path(util::get_env("CONDARC").value()));
         }
 
         std::vector<fs::u8path> mamba_user = {
-            env::user_config_dir() / ".mambarc",      env::user_config_dir() / "mambarc",
-            env::user_config_dir() / "mambarc.d",     env::home_directory() / ".mamba/.mambarc",
-            env::home_directory() / ".mamba/mambarc", env::home_directory() / ".mamba/mambarc.d",
-            env::home_directory() / ".mambarc",
+            fs::u8path(util::user_config_dir()) / "mamba/.mambarc",
+            fs::u8path(util::user_config_dir()) / "mamba/mambarc",
+            fs::u8path(util::user_config_dir()) / "mamba/mambarc.d",
+            fs::u8path(util::user_home_dir()) / ".mamba/.mambarc",
+            fs::u8path(util::user_home_dir()) / ".mamba/mambarc",
+            fs::u8path(util::user_home_dir()) / ".mamba/mambarc.d",
+            fs::u8path(util::user_home_dir()) / ".mambarc",
         };
-        if (env::get("MAMBARC"))
+        if (util::get_env("MAMBARC"))
         {
-            mamba_user.push_back(fs::u8path(env::get("MAMBARC").value()));
+            mamba_user.push_back(fs::u8path(util::get_env("MAMBARC").value()));
         }
 
         std::vector<fs::u8path> prefix = { context.prefix_params.target_prefix / ".condarc",
@@ -1856,23 +2006,43 @@ namespace mamba
                                            context.prefix_params.target_prefix / ".mambarc" };
 
         std::vector<fs::u8path> sources;
+        std::set<fs::u8path> known_locations;
+
+        // We only want to insert locations once, with the least precedence
+        // to emulate conda's IndexSet behavior
+
+        // This is especially important when the base env is active
+        // as target_prefix and root_prefix are the same.
+        // If there is a .condarc in the root_prefix, we don't want
+        // to load it twice, once for the root_prefix and once for the
+        // target_prefix with the highest precedence.
+        auto insertIntoSources = [&](const std::vector<fs::u8path>& locations)
+        {
+            for (auto& location : locations)
+            {
+                if (known_locations.insert(location).second)
+                {
+                    sources.emplace_back(location);
+                }
+            }
+        };
 
         if (level >= RCConfigLevel::kSystemDir)
         {
-            sources.insert(sources.end(), system.begin(), system.end());
+            insertIntoSources(system);
         }
         if ((level >= RCConfigLevel::kRootPrefix) && !context.prefix_params.root_prefix.empty())
         {
-            sources.insert(sources.end(), root.begin(), root.end());
+            insertIntoSources(root);
         }
         if (level >= RCConfigLevel::kHomeDir)
         {
-            sources.insert(sources.end(), conda_user.begin(), conda_user.end());
-            sources.insert(sources.end(), mamba_user.begin(), mamba_user.end());
+            insertIntoSources(conda_user);
+            insertIntoSources(mamba_user);
         }
         if ((level >= RCConfigLevel::kTargetPrefix) && !context.prefix_params.target_prefix.empty())
         {
-            sources.insert(sources.end(), prefix.begin(), prefix.end());
+            insertIntoSources(prefix);
         }
 
         // Sort by precedence
@@ -2158,7 +2328,7 @@ namespace mamba
                         continue;
                     }
 
-                    c.set_rc_yaml_value(yaml[key], env::shrink_user(source).string());
+                    c.set_rc_yaml_value(yaml[key], util::shrink_home(source.string()));
                 }
             }
         }

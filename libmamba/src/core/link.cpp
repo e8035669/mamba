@@ -13,16 +13,19 @@
 #include <reproc++/reproc.hpp>
 #include <reproc++/run.hpp>
 
-#include "mamba/core/environment.hpp"
 #include "mamba/core/link.hpp"
-#include "mamba/core/match_spec.hpp"
 #include "mamba/core/menuinst.hpp"
 #include "mamba/core/output.hpp"
 #include "mamba/core/transaction_context.hpp"
-#include "mamba/core/util_os.hpp"
-#include "mamba/core/validate.hpp"
+#include "mamba/specs/match_spec.hpp"
 #include "mamba/util/build.hpp"
+#include "mamba/util/environment.hpp"
 #include "mamba/util/string.hpp"
+#include "mamba/validation/tools.hpp"
+
+#ifdef __APPLE__
+#include "mamba/core/util_os.hpp"
+#endif
 
 #if _WIN32
 #include "../data/conda_exe.hpp"
@@ -314,7 +317,7 @@ namespace mamba
     bool run_script(
         const Context& context,
         const fs::u8path& prefix,
-        const PackageInfo& pkg_info,
+        const specs::PackageInfo& pkg_info,
         const std::string& action = "post-link",
         const std::string& env_prefix = "",
         bool activate = false
@@ -354,7 +357,7 @@ namespace mamba
         if (util::on_win)
         {
             ensure_comspec_set();
-            auto comspec = env::get("COMSPEC");
+            auto comspec = util::get_env("COMSPEC");
             if (!comspec)
             {
                 LOG_ERROR << "Failed to run " << action << " for " << pkg_info.name
@@ -383,10 +386,10 @@ namespace mamba
         else
         {
             // shell_path = 'sh' if 'bsd' in sys.platform else 'bash'
-            fs::u8path shell_path = env::which("bash");
+            fs::u8path shell_path = util::which("bash");
             if (shell_path.empty())
             {
-                shell_path = env::which("sh");
+                shell_path = util::which("sh");
             }
 
             if (activate)
@@ -416,8 +419,8 @@ namespace mamba
         envmap["PKG_VERSION"] = pkg_info.version;
         envmap["PKG_BUILDNUM"] = std::to_string(pkg_info.build_number);
 
-        std::string PATH = env::get("PATH").value_or("");
-        envmap["PATH"] = util::concat(path.parent_path().string(), env::pathsep(), PATH);
+        std::string PATH = util::get_env("PATH").value_or("");
+        envmap["PATH"] = util::concat(path.parent_path().string(), util::pathsep(), PATH);
 
         std::string cargs = util::join(" ", command_args);
         LOG_DEBUG << "For " << pkg_info.name << " at " << envmap["PREFIX"]
@@ -433,8 +436,7 @@ namespace mamba
         const std::string cwd = path.parent_path().string();
         options.working_directory = cwd.c_str();
 
-        LOG_TRACE << "ENV MAP:"
-                  << "\n ROOT_PREFIX: " << envmap["ROOT_PREFIX"]
+        LOG_TRACE << "ENV MAP:" << "\n ROOT_PREFIX: " << envmap["ROOT_PREFIX"]
                   << "\n PREFIX: " << envmap["PREFIX"] << "\n PKG_NAME: " << envmap["PKG_NAME"]
                   << "\n PKG_VERSION: " << envmap["PKG_VERSION"]
                   << "\n PKG_BUILDNUM: " << envmap["PKG_BUILDNUM"] << "\n PATH: " << envmap["PATH"]
@@ -456,7 +458,7 @@ namespace mamba
         if (ec)
         {
             LOG_ERROR << "response code: " << status << " error message: " << ec.message();
-            if (script_file != nullptr && env::get("CONDA_TEST_SAVE_TEMPS"))
+            if (script_file != nullptr && util::get_env("CONDA_TEST_SAVE_TEMPS"))
             {
                 LOG_ERROR << "CONDA_TEST_SAVE_TEMPS :: retaining run_script" << script_file->path();
             }
@@ -466,7 +468,7 @@ namespace mamba
     }
 
     UnlinkPackage::UnlinkPackage(
-        const PackageInfo& pkg_info,
+        const specs::PackageInfo& pkg_info,
         const fs::u8path& cache_path,
         TransactionContext* context
     )
@@ -564,7 +566,7 @@ namespace mamba
     }
 
     LinkPackage::LinkPackage(
-        const PackageInfo& pkg_info,
+        const specs::PackageInfo& pkg_info,
         const fs::u8path& cache_path,
         TransactionContext* context
     )
@@ -605,7 +607,7 @@ namespace mamba
             // Sometimes we might want to raise here ...
             m_clobber_warnings.push_back(rel_dst.string());
 #ifdef _WIN32
-            return std::make_tuple(validation::sha256sum(dst), rel_dst.string());
+            return std::make_tuple(std::string(validation::sha256sum(dst)), rel_dst.string());
 #endif
             fs::remove(dst);
         }
@@ -697,7 +699,7 @@ namespace mamba
                         fo << launcher << shebang << (buffer.c_str() + arc_pos);
                         fo.close();
                     }
-                    return std::make_tuple(validation::sha256sum(dst), rel_dst.string());
+                    return std::make_tuple(std::string(validation::sha256sum(dst)), rel_dst.string());
                 }
 #else
                 std::size_t padding_size = (path_data.prefix_placeholder.size() > new_prefix.size())
@@ -741,12 +743,12 @@ namespace mamba
             }
 
 #if defined(__APPLE__)
-            if (binary_changed && m_pkg_info.subdir == "osx-arm64")
+            if (binary_changed && m_pkg_info.platform == "osx-arm64")
             {
                 codesign(dst, m_context->context().output_params.verbosity > 1);
             }
 #endif
-            return std::make_tuple(validation::sha256sum(dst), rel_dst.string());
+            return std::make_tuple(std::string(validation::sha256sum(dst)), rel_dst.string());
         }
 
         if ((path_data.path_type == PathType::HARDLINK) || path_data.no_link)
@@ -808,7 +810,7 @@ namespace mamba
             );
         }
         return std::make_tuple(
-            path_data.sha256.empty() ? validation::sha256sum(dst) : path_data.sha256,
+            path_data.sha256.empty() ? std::string(validation::sha256sum(dst)) : path_data.sha256,
             rel_dst.string()
         );
     }
@@ -861,11 +863,15 @@ namespace mamba
 
         // handle noarch packages
         NoarchType noarch_type = NoarchType::NOT_A_NOARCH;
-        if (index_json.find("noarch") != index_json.end())
+        if (index_json.find("noarch") != index_json.end()
+            && index_json["noarch"].type() != nlohmann::json::value_t::null)
         {
             if (index_json["noarch"].type() == nlohmann::json::value_t::boolean)
             {
-                noarch_type = NoarchType::GENERIC_V1;
+                if (index_json["noarch"].get<bool>())
+                {
+                    noarch_type = NoarchType::GENERIC_V1;
+                }
             }
             else
             {
@@ -986,10 +992,10 @@ namespace mamba
         out_json["paths_data"] = paths_json;
         out_json["files"] = files_record;
 
-        MatchSpec* requested_spec = nullptr;
+        specs::MatchSpec* requested_spec = nullptr;
         for (auto& ms : m_context->requested_specs)
         {
-            if (ms.name == m_pkg_info.name)
+            if (ms.name().contains(m_pkg_info.name))
             {
                 requested_spec = &ms;
             }

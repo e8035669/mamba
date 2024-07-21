@@ -15,6 +15,7 @@ AllowShortLoopsOnASingleLine: 'false'
 AlwaysBreakTemplateDeclarations: 'true'
 BinPackArguments: false
 BinPackParameters: false
+BreakAfterAttributes: Leave
 BreakBeforeBinaryOperators: All
 BreakBeforeBraces: Allman
 BreakBeforeTernaryOperators: 'true'
@@ -69,6 +70,7 @@ PointerAlignment: Left
 QualifierAlignment: Custom  # Experimental
 QualifierOrder: [inline, static, constexpr, const, volatile, type]
 ReflowComments: 'true'
+SeparateDefinitionBlocks: Always
 SortIncludes: CaseInsensitive
 SortUsingDeclarations: Never
 SpaceAfterCStyleCast: 'true'

@@ -6,9 +6,9 @@
 
 #include <doctest/doctest.h>
 
-#include "mamba/core/channel.hpp"
-#include "mamba/core/context.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/pinning.hpp"
+#include "mamba/core/prefix_data.hpp"
 #include "mamba/core/util.hpp"
 
 #include "mambatests.hpp"
@@ -24,7 +24,7 @@ namespace mamba
                 std::vector<std::string> specs;
                 std::string pin;
 
-                ChannelContext channel_context{ mambatests::context() };
+                auto channel_context = ChannelContext::make_conda_compatible(mambatests::context());
                 auto sprefix_data = PrefixData::create("", channel_context);
                 if (!sprefix_data)
                 {
@@ -58,7 +58,7 @@ namespace mamba
                 pin = python_pin(prefix_data, specs);
                 CHECK_EQ(pin, "");
 
-                PackageInfo pkg_info("python", "3.7.10", "abcde", 0);
+                specs::PackageInfo pkg_info("python", "3.7.10", "abcde", 0);
                 prefix_data.add_packages({ pkg_info });
                 REQUIRE_EQ(prefix_data.records().size(), 1);
 

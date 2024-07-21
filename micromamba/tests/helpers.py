@@ -6,7 +6,6 @@ import random
 import shutil
 import string
 import subprocess
-import sys
 from enum import Enum
 from pathlib import Path
 
@@ -36,9 +35,7 @@ class DryRun(Enum):
 use_offline = False
 channel = ["-c", "conda-forge"]
 dry_run_tests = DryRun(
-    os.environ["MAMBA_DRY_RUN_TESTS"]
-    if ("MAMBA_DRY_RUN_TESTS" in os.environ)
-    else "OFF"
+    os.environ["MAMBA_DRY_RUN_TESTS"] if ("MAMBA_DRY_RUN_TESTS" in os.environ) else "OFF"
 )
 
 MAMBA_NO_PREFIX_CHECK = 1 << 0
@@ -68,13 +65,7 @@ def get_umamba(cwd=os.getcwd()):
     if os.getenv("TEST_MAMBA_EXE"):
         umamba = os.getenv("TEST_MAMBA_EXE")
     else:
-        if platform.system() == "Windows":
-            umamba_bin = "micromamba.exe"
-        else:
-            umamba_bin = "micromamba"
-        umamba = os.path.join(cwd, "build", "micromamba", umamba_bin)
-    if not Path(umamba).exists():
-        print("MICROMAMBA NOT FOUND!")
+        raise RuntimeError("Mamba/Micromamba not found! Set TEST_MAMBA_EXE env variable")
     return umamba
 
 
@@ -153,7 +144,7 @@ def install(*args, default_channel=True, no_rc=True, no_dry_run=False, **kwargs)
         try:
             j = json.loads(res)
             return j
-        except:
+        except Exception:
             print(res.decode())
             return
     if "--print-config-only" in args:
@@ -264,8 +255,6 @@ def update(*args, default_channel=True, no_rc=True, no_dry_run=False, **kwargs):
             except json.decoder.JSONDecodeError as e:
                 print(f"Error when loading JSON output from {res}")
                 raise (e)
-        print(f"Error when executing '{' '.join(cmd)}'")
-        raise
 
         return res.decode()
     except subprocess.CalledProcessError as e:
@@ -475,17 +464,21 @@ def recursive_chmod(path: Path, permission, is_root=True):
 
 
 def rmtree(path: Path):
-    p = Path(path)
-    recursive_chmod(p, 0o700)
+    path = Path(path)
 
-    def handleError(func, path, exc_info):
-        recursive_chmod(path, 0o700)
-        func(path)
+    if not path.exists():
+        return
 
-    if p.is_dir():
-        shutil.rmtree(p, onerror=handleError)
+    recursive_chmod(path, 0o700)
+
+    def handleError(func, p, exc_info):
+        recursive_chmod(p, 0o700)
+        func(p)
+
+    if path.is_dir():
+        shutil.rmtree(path, onerror=handleError)
     else:
-        os.remove(p)
+        os.remove(path)
 
 
 def get_fake_activate(prefix):
@@ -507,3 +500,19 @@ def get_fake_activate(prefix):
     env["PATH"] = os.pathsep.join([str(x) for x in addpath + curpath])
     env["CONDA_PREFIX"] = str(prefix)
     return env
+
+
+def create_with_chan_pkg(env_name, channels, package):
+    cmd = [
+        "-n",
+        env_name,
+        "--override-channels",
+        "--strict-channel-priority",
+        "--dry-run",
+        "--json",
+    ]
+    for channel in channels:
+        cmd += ["-c", os.path.abspath(os.path.join(*channel))]
+    cmd.append(package)
+
+    return create(*cmd, default_channel=False, no_rc=False)

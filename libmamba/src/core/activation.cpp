@@ -6,11 +6,12 @@
 
 #include "mamba/core/activation.hpp"
 #include "mamba/core/context.hpp"
-#include "mamba/core/environment.hpp"
 #include "mamba/core/output.hpp"
 #include "mamba/core/shell_init.hpp"
 #include "mamba/core/util.hpp"
+#include "mamba/core/util_os.hpp"
 #include "mamba/util/build.hpp"
+#include "mamba/util/environment.hpp"
 #include "mamba/util/string.hpp"
 
 namespace mamba
@@ -20,7 +21,7 @@ namespace mamba
         fs::u8path PREFIX_STATE_FILE = fs::u8path("conda-meta") / "state";
         fs::u8path PACKAGE_ENV_VARS_DIR = fs::u8path("etc") / "conda" / "env_vars.d";
         std::string CONDA_ENV_VARS_UNSET_VAR = "***unset***";  // NOLINT(runtime/string)
-    }                                                          // namespace
+    }  // namespace
 
     /****************************
      * Activator implementation *
@@ -28,7 +29,7 @@ namespace mamba
 
     Activator::Activator(const Context& context)
         : m_context(context)
-        , m_env(env::copy())
+        , m_env(util::get_env_map())
     {
     }
 
@@ -229,7 +230,7 @@ namespace mamba
         std::vector<fs::u8path> path;
         if (m_env.find("PATH") != m_env.end())
         {
-            auto strings = util::split(m_env["PATH"], env::pathsep());
+            auto strings = util::split(m_env["PATH"], util::pathsep());
             for (auto& s : strings)
             {
                 path.push_back(s);
@@ -267,7 +268,7 @@ namespace mamba
         final_path.insert(final_path.end(), path_list.begin(), path_list.end());
         final_path.erase(std::unique(final_path.begin(), final_path.end()), final_path.end());
 
-        std::string result = util::join(env::pathsep(), final_path).string();
+        std::string result = util::join(util::pathsep(), final_path).string();
         return result;
     }
 
@@ -310,7 +311,7 @@ namespace mamba
 
             // remove duplicates
             final_path.erase(std::unique(final_path.begin(), final_path.end()), final_path.end());
-            std::string result = util::join(env::pathsep(), final_path).string();
+            std::string result = util::join(util::pathsep(), final_path).string();
             return result;
         }
         else
@@ -319,7 +320,7 @@ namespace mamba
                 std::unique(current_path.begin(), current_path.end()),
                 current_path.end()
             );
-            std::string result = util::join(env::pathsep(), current_path).string();
+            std::string result = util::join(util::pathsep(), current_path).string();
             return result;
         }
     }
@@ -353,6 +354,7 @@ namespace mamba
             }
         }
     }
+
     EnvironmentTransform Activator::build_reactivate()
     {
         std::string conda_prefix;
@@ -709,10 +711,10 @@ namespace mamba
         }
 
         // if we are in a `mamba shell -n <env>` we don't want to activate base
-        auto has_prefix = env::get("CONDA_PREFIX");
+        auto has_prefix = util::get_env("CONDA_PREFIX");
         if (m_context.auto_activate_base && !has_prefix.has_value())
         {
-            builder << "micromamba activate base\n";
+            builder << get_self_exe_path().stem() << " activate base\n";
         }
         builder << hook_postamble() << "\n";
         return builder.str();
@@ -785,7 +787,7 @@ namespace mamba
             // use.
             return { "", "" };
         }
-        auto current_prompt_modifier = env::get("CONDA_PROMPT_MODIFIER");
+        auto current_prompt_modifier = util::get_env("CONDA_PROMPT_MODIFIER");
         if (current_prompt_modifier)
         {
             util::replace_all(ps1, current_prompt_modifier.value(), "");
@@ -834,7 +836,7 @@ namespace mamba
 
     fs::u8path PosixActivator::hook_source_path()
     {
-        return m_context.prefix_params.root_prefix / "etc" / "profile.d" / "micromamba.sh";
+        return m_context.prefix_params.root_prefix / "etc" / "profile.d" / "mamba.sh";
     }
 
     /*********************************
@@ -898,7 +900,7 @@ namespace mamba
     CshActivator::update_prompt(const std::string& conda_prompt_modifier)
     {
         std::string prompt = (m_env.find("prompt") != m_env.end()) ? m_env["prompt"] : "";
-        auto current_prompt_modifier = env::get("CONDA_PROMPT_MODIFIER");
+        auto current_prompt_modifier = util::get_env("CONDA_PROMPT_MODIFIER");
         if (current_prompt_modifier)
         {
             util::replace_all(prompt, current_prompt_modifier.value(), "");
@@ -909,7 +911,6 @@ namespace mamba
         util::replace_all(prompt, "'", "'\"'\"'");
         return { "prompt", conda_prompt_modifier + prompt };
     }
-
 
     std::string CshActivator::shell_extension()
     {
@@ -933,9 +934,8 @@ namespace mamba
 
     fs::u8path CshActivator::hook_source_path()
     {
-        return m_context.prefix_params.root_prefix / "etc" / "profile.d" / "micromamba.csh";
+        return m_context.prefix_params.root_prefix / "etc" / "profile.d" / "mamba.csh";
     }
-
 
     std::string CmdExeActivator::shell_extension()
     {
@@ -1214,6 +1214,74 @@ namespace mamba
             out << "source " << p << "\n";
         }
 
+        return out.str();
+    }
+
+    std::string NuActivator::shell_extension()
+    {
+        return ".nu";
+    }
+
+    std::string NuActivator::shell()
+    {
+        return "nu";
+    }
+
+    std::string NuActivator::hook_preamble()
+    {
+        return "";
+    }
+
+    std::string NuActivator::hook_postamble()
+    {
+        return "";
+    }
+
+    fs::u8path NuActivator::hook_source_path()
+    {
+        return "";
+    }
+
+    std::pair<std::string, std::string> NuActivator::update_prompt(const std::string&)
+    {
+        // hook is implemented in shell_init.cpp as nushell behaves like a compiled language;
+        // one cannot dynamically evaluate strings
+        return { "", "" };
+    }
+
+    std::string NuActivator::script(const EnvironmentTransform& env_transform)
+    {
+        std::stringstream out;
+
+        if (!env_transform.export_path.empty())
+        {
+            out << "PATH = " << env_transform.export_path << ";";
+        }
+
+        for (const fs::u8path& ds : env_transform.deactivate_scripts)
+        {
+            out << "source " << ds << ";";
+        }
+
+        for (const std::string& uvar : env_transform.unset_vars)
+        {
+            out << "hide-env " << uvar << ";";
+        }
+
+        for (const auto& [skey, svar] : env_transform.set_vars)
+        {
+            out << "let " << skey << " = " << svar << ";";
+        }
+
+        for (const auto& [ekey, evar] : env_transform.export_vars)
+        {
+            out << ekey << " = " << evar << ";";
+        }
+
+        for (const fs::u8path& p : env_transform.activate_scripts)
+        {
+            out << "source " << p << ";";
+        }
         return out.str();
     }
 }  // namespace mamba

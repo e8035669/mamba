@@ -1,3 +1,263 @@
+libmambapy 2.0.0rc0 (July 08, 2024)
+===================================
+
+
+Bug fixes:
+
+- Split `ContextOptions::enable_logging_and_signal_handling` into 2 different options by @Klaim in https://github.com/mamba-org/mamba/pull/3329
+
+libmambapy 2.0.0beta3 (June 14, 2024)
+=====================================
+
+
+Bug fixes:
+
+- libmambapy:  use `Context` explicitly by @Klaim in https://github.com/mamba-org/mamba/pull/3309
+- Fix release scripts by @Hind-M in https://github.com/mamba-org/mamba/pull/3306
+
+CI fixes and doc:
+
+- Fix CI failure on win-64 by @Hind-M in https://github.com/mamba-org/mamba/pull/3315
+
+libmambapy 2.0.0beta2 (May 29, 2024)
+====================================
+
+Enhancements:
+
+- Add checking typos to pre-commit by @Hind-M in https://github.com/mamba-org/mamba/pull/3278
+
+libmambapy 2.0.0beta1 (May 04, 2024)
+====================================
+
+Enhancements:
+
+- Bind text_style and graphic params by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3266
+- Bind VersionPredicate by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3255
+- Update pre-commit hooks" by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3252
+- Handle regex in build string by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3239
+- Custom resolve complex MatchSpec in Solver by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3233
+- Add MatchSpec::contains_except_channel" by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3231
+- Refactor MatchSpec::str by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3215
+- Subdir renaming by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3214
+- Fully bind MatchSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3213
+
+Bug fixes:
+
+- Fix VersionSpec equal and glob by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3269
+- Add missing pybind header by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3256
+- Don't add duplicate .conda and .tar.bz2 packages by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3253
+- Use conda-forge feedstock for static builds by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3249
+- Make Taskfile.dist.yml Windows-compatible by @carschandler in https://github.com/mamba-org/mamba/pull/3219
+
+CI fixes and doc:
+
+- Small changelog additions by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3254
+- Fixed a spelling mistake in micromamba-installation.rst by @codeblech in https://github.com/mamba-org/mamba/pull/3236
+- Typos in dev_environment.rst by @jd-foster in https://github.com/mamba-org/mamba/pull/3235
+- Add MatchSpec doc and fix errors by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3224
+
+libmambapy 2.0.0beta0 (April 04, 2024)
+======================================
+
+Enhancements:
+
+- Bind VersionPredicate by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3255
+- Update pre-commit hooks" by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3252
+
+Bug fixes:
+
+- Add missing pybind header by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3256
+- Don't add duplicate .conda and .tar.bz2 packages by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3253
+
+CI fixes and doc:
+
+- Small changelog additions by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3254
+
+libmambapy 2.0.0alpha4 (March 26, 2024)
+=======================================
+
+Enhancements:
+
+- Handle regex in build string by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3239
+- Custom resolve complex MatchSpec in Solver by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3233
+- Add MatchSpec::contains_except_channel" by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3231
+- Refactor MatchSpec::str by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3215
+- Subdir renaming by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3214
+- Fully bind MatchSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3213
+
+Bug fixes:
+
+- Use conda-forge feedstock for static builds by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3249
+- Make Taskfile.dist.yml Windows-compatible by @carschandler in https://github.com/mamba-org/mamba/pull/3219
+
+CI fixes and doc:
+
+- Fixed a spelling mistake in micromamba-installation.rst by @codeblech in https://github.com/mamba-org/mamba/pull/3236
+- Typos in dev_environment.rst by @jd-foster in https://github.com/mamba-org/mamba/pull/3235
+- Add MatchSpec doc and fix errors by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3224
+
+libmambapy 2.0.0alpha3 (February 28, 2024)
+==========================================
+
+Enhancements:
+
+- Added HTTP Mirrors by @JohanMabille in https://github.com/mamba-org/mamba/pull/3178
+- Use expected for specs parsing by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3201
+- Add more solver tests and other small features by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3198
+- Finalized Solver bindings and add solver doc by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3195
+- Add libsolv.Database Bindings and tests by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3186
+- Rename MPool into solver::libsolv::Database by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3180
+- Automate releases (`CHANGELOG.md` updating) by @Hind-M in https://github.com/mamba-org/mamba/pull/3179
+- Simplify MPool Interface by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3177
+- Clean libsolv use in Transaction by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3171
+
+CI fixes and doc:
+
+libmambapy 2.0.0alpha2 (February 02, 2024)
+==========================================
+
+Enhancements:
+
+- More specs bindings by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3080
+- Add VersionSpec::str by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3081
+- Some future proofing MatchSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3082
+- Fix VersionSpec free ranges by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3088
+- MatchSpec use VersionSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3089
+- GlobSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3094
+- Clean PackageInfo interface by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3103
+- NoArchType as standalone enum by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3108
+- Move PackageInfo in specs:: by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3109
+- Change PackageInfo types by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3113
+- Add some PackageInfo tests by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3115
+- Rename ChannelSpec > UndefinedChannel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3117
+- Add Channel::contains_package by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3121
+- Pool channel match by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3122
+- Add expected caster to Union by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3135
+- MRepo refactor by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3118
+- No M by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3137
+- Solver improvements by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3140
+- Solver Request by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3141
+- Refactor solver flags by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3153
+- Split Solver and Unsolvable by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3156
+- Solver sort deps by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3163
+- Bind solver::libsolv::UnSolvable by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3166
+- Improve Query API by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3167
+
+Bug fixes:
+
+- Fix expected caster by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3136
+
+CI fixes and doc:
+
+- Remove dead mamba.py doc by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3078
+- Document specs::Channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3077
+- Fix --override-channels docs by @jonashaag in https://github.com/mamba-org/mamba/pull/3084
+- Add 2.0 changes draft by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3091
+- Add Breathe for API documentation by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3087
+- Warning around manual install and add ref to conda-libmamba by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3119
+- Add MacOS DNS issue logging by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3130
+
+libmambapy 2.0.0alpha1 (December 18, 2023)
+==========================================
+
+Bug fixes:
+
+- Fix 2.0 alpha by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3067
+
+CI fixes and doc:
+
+- Add CI merge groups by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3068
+
+libmambapy 2.0.0alpha0 (December 14, 2023)
+==========================================
+
+Enhancements:
+
+- Context: not a singleton by @Klaim in https://github.com/mamba-org/mamba/pull/2615
+- No ugly kenum by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2831
+- Further improve micromamba search output by @delsner in https://github.com/mamba-org/mamba/pull/2823
+- Download by @JohanMabille in https://github.com/mamba-org/mamba/pull/2844
+- Add multiple queries to repoquery search by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2897
+- Add ChannelSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2870
+- Added PackageFetcher by @JohanMabille in https://github.com/mamba-org/mamba/pull/2917
+- Resolve ChannelSpec into a Channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2899
+- Combine dev environments by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2937
+- Dev workflow by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2948
+- Explicit and smart CMake target by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2935
+- Modularize libmambapy by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2960
+- Update dependencies on OSX by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2976
+- Channel initialization by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2953
+- Migrate Channel::make_channel to resolve multi channels by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2986
+- Move core/channel > specs/channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3000
+- Remove ChannelContext ctor by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3002
+- Remove ChanelContext context capture by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3015
+- Bind Channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3001
+- Bind ChannelContext by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3034
+- MatchSpec small improvements by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3043
+- Plug ChannelSpec in MatchSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3046
+- Change MatchSpec::parse to named constructor by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3048
+- restore use_default_signal_handler flag for libmambapy by @dholth in https://github.com/mamba-org/mamba/pull/3028
+
+Bug fixes:
+
+- fix subs by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2817
+- fix: Parse remote_connect_timeout_secs as a double by @jjerphan in https://github.com/mamba-org/mamba/pull/2949
+- Add cmake-format by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2962
+
+CI fixes and doc:
+
+- Refactor CI and libamambapy tests (on Unix) by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2952
+- Refactor CI and libamambapy tests (on Win) by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2955
+- Simplify and correct development documention by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2975
+- Add install from source instructions by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2977
+- update readme install link by @artifical-agent in https://github.com/mamba-org/mamba/pull/2980
+- Fail fast except on debug runs by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2985
+
+libmambapy 2.0.0alpha0 (December 14, 2023)
+==========================================
+
+Enhancements:
+
+- Context: not a singleton by @Klaim in https://github.com/mamba-org/mamba/pull/2615
+- No ugly kenum by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2831
+- Further improve micromamba search output by @delsner in https://github.com/mamba-org/mamba/pull/2823
+- Download by @JohanMabille in https://github.com/mamba-org/mamba/pull/2844
+- Add multiple queries to repoquery search by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2897
+- Add ChannelSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2870
+- Added PackageFetcher by @JohanMabille in https://github.com/mamba-org/mamba/pull/2917
+- Resolve ChannelSpec into a Channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2899
+- Combine dev environments by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2937
+- Dev workflow by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2948
+- Explicit and smart CMake target by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2935
+- Modularize libmambapy by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2960
+- Update dependencies on OSX by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2976
+- Channel initialization by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2953
+- Migrate Channel::make_channel to resolve multi channels by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2986
+- Move core/channel > specs/channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3000
+- Remove ChannelContext ctor by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3002
+- Remove ChanelContext context capture by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3015
+- Bind Channel by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3001
+- Bind ChannelContext by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3034
+- MatchSpec small improvements by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3043
+- Plug ChannelSpec in MatchSpec by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3046
+- Change MatchSpec::parse to named constructor by @AntoinePrv in https://github.com/mamba-org/mamba/pull/3048
+- restore use_default_signal_handler flag for libmambapy by @dholth in https://github.com/mamba-org/mamba/pull/3028
+
+Bug fixes:
+
+- fix subs by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2817
+- fix: Parse remote_connect_timeout_secs as a double by @jjerphan in https://github.com/mamba-org/mamba/pull/2949
+- Add cmake-format by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2962
+
+CI fixes and doc:
+
+- Refactor CI and libamambapy tests (on Unix) by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2952
+- Refactor CI and libamambapy tests (on Win) by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2955
+- Simplify and correct development documention by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2975
+- Add install from source instructions by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2977
+- update readme install link by @artifical-agent in https://github.com/mamba-org/mamba/pull/2980
+- Fail fast except on debug runs by @AntoinePrv in https://github.com/mamba-org/mamba/pull/2985
+
 libmambapy 1.5.1 (September 05, 2023)
 =====================================
 

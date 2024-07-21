@@ -6,12 +6,15 @@ Troubleshooting
 Please use the official installer
 ---------------------------------
 
-Please make sure that you use the :ref:`official Mambaforge installer <installation>` to install Mamba. Other installation methods are not supported.
+Please make sure that you use the :ref:`official Mambaforge installer <mamba-install>` to install Mamba.
+Other installation methods are not supported.
 
 Mamba should be installed to the ``base`` environment
 -----------------------------------------------------
 
 Installing Mamba to an environment other than ``base`` is not supported. Mamba must be installed in the ``base`` environment alongside Conda, and no other packages may be installed into ``base``.
+
+.. _base_packages:
 
 No other packages should be installed to ``base``
 -------------------------------------------------
@@ -20,28 +23,33 @@ Installing packages other than Conda and Mamba into the ``base`` environment is 
 
 .. _defaults_channels:
 
-Mixing the ``defaults`` and ``conda-forge`` channels
-----------------------------------------------------
+Using the ``defaults`` channels
+-------------------------------
 
-The `Anaconda default channels <https://docs.anaconda.com/anaconda/user-guide/tasks/using-repositories/>`_ are **incompatible** with conda-forge:
+It is **not recommended** to use the
+`Anaconda default channels <https://docs.anaconda.com/free/anaconda/reference/default-repositories/>`_:
 
 - ``pkgs/main``
 - ``pkgs/r`` / ``R``
 - ``msys2``
 - ``defaults`` (which includes all of the above)
 
-Using the default and ``conda-forge`` channels at the same time is not supported, eg. using a channel configuration like this:
+Please note that we won't be able to help resolving any problems you might face with the Anaconda channels.
 
-.. code-block:: yaml
+To check if you have any Anaconda default channels in your configuration, use::
 
-  # NOT supported!
-  channels:
-    - conda-forge
-    - defaults
+    $ mamba info
+    ...
+    channel URLs : https://repo.anaconda.com/pkgs/... # BAD!
+                   ...
+                   https://conda.anaconda.org/conda-forge/...
+    ...
 
-Please disable the default channels in your install command::
+Please change your configuration to use only ``conda-forge`` using one of the following methods.
 
-  mamba create -c nodefaults ...
+Disable the default channels in your install commands::
+
+  mamba install --override-channels ...
 
 Or your :file:`environment.yml` file:
 
@@ -59,7 +67,23 @@ Or in your :file:`~/.condarc` file:
   ...
   channels:
     - ...
+    - defaults  # BAD! Remove this if it exists.
     - nodefaults
+
+Mixing the ``defaults`` and ``conda-forge`` channels
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The `Anaconda default channels <https://docs.anaconda.com/free/anaconda/reference/default-repositories/>`_
+are **incompatible** with conda-forge.
+
+Using the default and ``conda-forge`` channels at the same time is not supported and will lead to broken environments:
+
+.. code-block:: yaml
+
+  # NOT supported!
+  channels:
+    - conda-forge
+    - defaults
 
 Mamba broken after Conda update
 -------------------------------
@@ -75,8 +99,8 @@ While we make our best effort to keep backward compatibility, it is not impossib
 breaks the current installation.
 The following actions can be tried:
 
-- Reinitializing your shell with `micromamba shell reinit`.
-- Deleting the package cache (`"package cache"` entries in `micromamba info`)
+- Reinitializing your shell with ``micromamba shell reinit``.
+- Deleting the package cache (``"package cache"`` entries in ``micromamba info``)
 
 libmamba.so.2: undefined symbol ...
 -----------------------------------
@@ -92,9 +116,9 @@ Windows API historically supports paths up to 260 characters. While it's now pos
 
 
 Long paths support has to be activated
-**************************************
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-source: Robocorp `troubleshooting documentation <https://robocorp.com/docs/troubleshooting/windows-long-path>`_
+source: Robocop `troubleshooting documentation <https://robocorp.com/docs/troubleshooting/windows-long-path>`_
 
 1. Open the Local Group Policy Editor application: - Start --> type gpedit.msc --> Enter:
 2. Navigate to Computer Configuration > Administrative Templates > System > Filesystem. On the right, find the "Enable win32 long paths" item and double-click it
@@ -110,7 +134,7 @@ If the problem persists after those steps, try the following:
 
 
 cmd.exe does not support calls to long prefixes
-***********************************************
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 While ``cmd.exe`` shell support long paths prefixing for directory operations such as ``dir``, it doesn't allow to call an executable or a batch file located at a long path prefix.
 

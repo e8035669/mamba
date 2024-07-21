@@ -9,11 +9,14 @@
 #include "mamba/api/configuration.hpp"
 #include "mamba/api/create.hpp"
 #include "mamba/api/remove.hpp"
-#include "mamba/core/channel.hpp"
+#include "mamba/api/update.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/environments_manager.hpp"
 #include "mamba/core/prefix_data.hpp"
+#include "mamba/core/util.hpp"
+#include "mamba/specs/conda_url.hpp"
+#include "mamba/util/path_manip.hpp"
 #include "mamba/util/string.hpp"
-#include "mamba/util/url_manip.hpp"
 
 #include "common_options.hpp"
 
@@ -21,7 +24,7 @@
 using namespace mamba;  // NOLINT(build/namespaces)
 
 std::string
-get_env_name(const Context& ctx, const fs::u8path& px)
+get_env_name(const Context& ctx, const mamba::fs::u8path& px)
 {
     auto& ed = ctx.envs_dirs[0];
     if (px == ctx.prefix_params.root_prefix)
@@ -30,7 +33,7 @@ get_env_name(const Context& ctx, const fs::u8path& px)
     }
     else if (util::starts_with(px.string(), ed.string()))
     {
-        return fs::relative(px, ed).string();
+        return mamba::fs::relative(px, ed).string();
     }
     else
     {
@@ -38,23 +41,66 @@ get_env_name(const Context& ctx, const fs::u8path& px)
     }
 }
 
-
 void
 set_env_command(CLI::App* com, Configuration& config)
 {
     init_general_options(com, config);
     init_prefix_options(com, config);
 
+    // env list subcommand
     auto* list_subcom = com->add_subcommand("list", "List known environments");
     init_general_options(list_subcom, config);
     init_prefix_options(list_subcom, config);
 
+    list_subcom->callback(
+        [&config]
+        {
+            const auto& ctx = config.context();
+            config.load();
+
+            EnvironmentsManager env_manager{ ctx };
+
+            if (ctx.output_params.json)
+            {
+                nlohmann::json res;
+                const auto pfxs = env_manager.list_all_known_prefixes();
+                std::vector<std::string> envs(pfxs.size());
+                std::transform(
+                    pfxs.begin(),
+                    pfxs.end(),
+                    envs.begin(),
+                    [](const mamba::fs::u8path& path) { return path.string(); }
+                );
+                res["envs"] = envs;
+                std::cout << res.dump(4) << std::endl;
+                return;
+            }
+
+            // format and print table
+            printers::Table t({ "Name", "Active", "Path" });
+            t.set_alignment(
+                { printers::alignment::left, printers::alignment::left, printers::alignment::left }
+            );
+            t.set_padding({ 2, 2, 2 });
+
+            for (auto& env : env_manager.list_all_known_prefixes())
+            {
+                bool is_active = (env == ctx.prefix_params.target_prefix);
+                t.add_row({ get_env_name(ctx, env), is_active ? "*" : "", env.string() });
+            }
+            t.print(std::cout);
+        }
+    );
+
+    // env create subcommand
     auto* create_subcom = com->add_subcommand(
         "create",
         "Create new environment (pre-commit.com compatibility alias for 'micromamba create')"
     );
     init_install_options(create_subcom, config);
+    create_subcom->callback([&] { return mamba::create(config); });
 
+    // env export subcommand
     static bool explicit_format = false;
     static int no_md5 = 0;
     static bool no_build = false;
@@ -62,8 +108,10 @@ set_env_command(CLI::App* com, Configuration& config)
     static bool from_history = false;
 
     auto* export_subcom = com->add_subcommand("export", "Export environment");
+
     init_general_options(export_subcom, config);
     init_prefix_options(export_subcom, config);
+
     export_subcom->add_flag("-e,--explicit", explicit_format, "Use explicit format");
     export_subcom->add_flag("--no-md5,!--md5", no_md5, "Disable md5");
     export_subcom->add_flag("--no-build,!--build", no_build, "Disable the build string in spec");
@@ -80,7 +128,7 @@ set_env_command(CLI::App* com, Configuration& config)
             auto& ctx = config.context();
             config.load();
 
-            mamba::ChannelContext channel_context{ ctx };
+            auto channel_context = mamba::ChannelContext::make_conda_compatible(ctx);
             if (explicit_format)
             {
                 // TODO: handle error
@@ -93,9 +141,21 @@ set_env_command(CLI::App* com, Configuration& config)
 
                 for (const auto& record : records)
                 {
-                    std::string clean_url, token;
-                    util::split_anaconda_token(record.url, clean_url, token);
-                    std::cout << clean_url;
+                    std::cout <<  //
+                        specs::CondaURL::parse(record.package_url)
+                            .transform(
+                                [](specs::CondaURL&& url)
+                                {
+                                    using Credentials = typename specs::CondaURL::Credentials;
+                                    return url.str(Credentials::Remove);
+                                }
+                            )
+                            .or_else(
+                                [&](const auto&) -> specs::expected_parse_t<std::string>
+                                { return record.package_url; }
+                            )
+                            .value();
+
                     if (no_md5 != 1)
                     {
                         std::cout << "#" << record.md5;
@@ -123,7 +183,7 @@ set_env_command(CLI::App* com, Configuration& config)
                         continue;
                     }
 
-                    const Channel& channel = channel_context.make_channel(v.url);
+                    auto chans = channel_context.make_channel(v.channel);
 
                     if (from_history)
                     {
@@ -134,7 +194,10 @@ set_env_command(CLI::App* com, Configuration& config)
                         dependencies << "- ";
                         if (channel_subdir)
                         {
-                            dependencies << channel.name() << "/" << v.subdir << "::";
+                            dependencies
+                                // If the size is not one, it's a custom multi channel
+                                << ((chans.size() == 1) ? chans.front().display_name() : v.channel)
+                                << "/" << v.platform << "::";
                         }
                         dependencies << v.name << "=" << v.version;
                         if (!no_build)
@@ -148,7 +211,10 @@ set_env_command(CLI::App* com, Configuration& config)
                         dependencies << "\n";
                     }
 
-                    channels.insert(channel.name());
+                    for (const auto& chan : chans)
+                    {
+                        channels.insert(chan.display_name());
+                    }
                 }
 
                 for (const auto& c : channels)
@@ -161,51 +227,10 @@ set_env_command(CLI::App* com, Configuration& config)
         }
     );
 
-    list_subcom->callback(
-        [&config]
-        {
-            const auto& ctx = config.context();
-            config.load();
-
-            EnvironmentsManager env_manager{ ctx };
-
-            if (ctx.output_params.json)
-            {
-                nlohmann::json res;
-                const auto pfxs = env_manager.list_all_known_prefixes();
-                std::vector<std::string> envs(pfxs.size());
-                std::transform(
-                    pfxs.begin(),
-                    pfxs.end(),
-                    envs.begin(),
-                    [](const fs::u8path& path) { return path.string(); }
-                );
-                res["envs"] = envs;
-                std::cout << res.dump(4) << std::endl;
-                return;
-            }
-
-            // format and print table
-            printers::Table t({ "Name", "Active", "Path" });
-            t.set_alignment(
-                { printers::alignment::left, printers::alignment::left, printers::alignment::left }
-            );
-            t.set_padding({ 2, 2, 2 });
-
-            for (auto& env : env_manager.list_all_known_prefixes())
-            {
-                bool is_active = (env == ctx.prefix_params.target_prefix);
-                t.add_row({ get_env_name(ctx, env), is_active ? "*" : "", env.string() });
-            }
-            t.print(std::cout);
-        }
-    );
-
+    // env remove subcommand
     auto* remove_subcom = com->add_subcommand("remove", "Remove an environment");
     init_general_options(remove_subcom, config);
     init_prefix_options(remove_subcom, config);
-
-    create_subcom->callback([&] { return mamba::create(config); });
 
     remove_subcom->callback(
         [&config]
@@ -218,11 +243,11 @@ set_env_command(CLI::App* com, Configuration& config)
             {
                 const auto& prefix = ctx.prefix_params.target_prefix;
                 // Remove env directory or rename it (e.g. if used)
-                remove_or_rename(ctx, env::expand_user(prefix));
+                remove_or_rename(ctx, util::expand_home(prefix.string()));
 
                 EnvironmentsManager env_manager{ ctx };
                 // Unregister environment
-                env_manager.unregister_env(env::expand_user(prefix));
+                env_manager.unregister_env(util::expand_home(prefix.string()));
 
                 Console::instance().print(util::join(
                     "",
@@ -235,5 +260,30 @@ set_env_command(CLI::App* com, Configuration& config)
                 Console::stream() << "Dry run. The environment was not removed.";
             }
         }
+    );
+
+    // env update subcommand
+    auto* update_subcom = com->add_subcommand("update", "Update an environment");
+
+    init_general_options(update_subcom, config);
+    init_prefix_options(update_subcom, config);
+
+    auto& file_specs = config.at("file_specs");
+    update_subcom->add_option(
+        "-f,--file",
+        file_specs.get_cli_config<std::vector<std::string>>(),
+        file_specs.description()
+    );
+
+    static bool remove_not_specified = false;
+    update_subcom->add_flag(
+        "--prune",
+        remove_not_specified,
+        "Remove installed packages not specified in the command and in environment file"
+    );
+
+    update_subcom->callback(
+        [&config]
+        { update(config, /*update_all*/ false, /*prune_deps*/ false, remove_not_specified); }
     );
 }

@@ -4,6 +4,7 @@
 //
 // The full license is in the file LICENSE, distributed with this software.
 
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -18,11 +19,10 @@
 #include <unistd.h>
 #endif
 
-#include "mamba/core/channel.hpp"
-#include "mamba/core/context.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/history.hpp"
 
-#include "test_data.hpp"
+#include "mambatests.hpp"
 
 namespace mamba
 {
@@ -31,10 +31,10 @@ namespace mamba
         TEST_CASE("parse")
         {
             static const auto history_file_path = fs::absolute(
-                test_data_dir / "history/parse/conda-meta/history"
+                mambatests::test_data_dir / "history/parse/conda-meta/history"
             );
             static const auto aux_file_path = fs::absolute(
-                test_data_dir / "history/parse/conda-meta/aux_file"
+                mambatests::test_data_dir / "history/parse/conda-meta/aux_file"
             );
 
             // Backup history file and restore it at the end of the test, whatever the output.
@@ -45,6 +45,7 @@ namespace mamba
                     fs::remove(aux_file_path);
                     fs::copy(history_file_path, aux_file_path);
                 }
+
                 ~ScopedHistoryFileBackup()
                 {
                     fs::remove(history_file_path);
@@ -52,10 +53,10 @@ namespace mamba
                 }
             } scoped_history_file_backup;
 
-            ChannelContext channel_context{ mambatests::context() };
+            auto channel_context = ChannelContext::make_conda_compatible(mambatests::context());
 
             // Gather history from current history file.
-            History history_instance(test_data_dir / "history/parse", channel_context);
+            History history_instance(mambatests::test_data_dir / "history/parse", channel_context);
             std::vector<History::UserRequest> user_reqs = history_instance.get_user_requests();
 
             // Extract raw history file content into buffer.
@@ -96,7 +97,7 @@ namespace mamba
         TEST_CASE("parse_segfault")
         {
             pid_t child = fork();
-            ChannelContext channel_context{ mambatests::context() };
+            auto channel_context = ChannelContext::make_conda_compatible(mambatests::context());
             if (child)
             {
                 int wstatus;

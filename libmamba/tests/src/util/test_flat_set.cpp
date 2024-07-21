@@ -12,6 +12,8 @@
 
 #include "mamba/util/flat_set.hpp"
 
+#include "doctest-printer/flat_set.hpp"
+
 using namespace mamba::util;
 
 TEST_SUITE("util::flat_set")
@@ -34,7 +36,6 @@ TEST_SUITE("util::flat_set")
         CHECK_EQ(s6.size(), s5.size());
         static_assert(std::is_same_v<decltype(s6)::value_type, decltype(s5)::value_type>);
     }
-
 
     TEST_CASE("equality")
     {
@@ -105,5 +106,119 @@ TEST_SUITE("util::flat_set")
         CHECK_EQ(s.back(), 1);
         s.insert(6);
         CHECK_EQ(s.front(), 6);
+    }
+
+    TEST_CASE("Set operations")
+    {
+        const auto s1 = flat_set<int>({ 1, 3, 4, 5 });
+        const auto s2 = flat_set<int>({ 3, 5 });
+        const auto s3 = flat_set<int>({ 4, 6 });
+
+        SUBCASE("Disjoint")
+        {
+            CHECK(set_is_disjoint_of(s1, flat_set<int>{}));
+            CHECK_FALSE(set_is_disjoint_of(s1, s1));
+            CHECK_FALSE(set_is_disjoint_of(s1, s2));
+            CHECK_FALSE(set_is_disjoint_of(s1, s3));
+            CHECK(set_is_disjoint_of(s2, s3));
+            CHECK(set_is_disjoint_of(s3, s2));
+        }
+
+        SUBCASE("Subset")
+        {
+            CHECK(set_is_subset_of(s1, s1));
+            CHECK_FALSE(set_is_strict_subset_of(s1, s1));
+            CHECK(set_is_subset_of(flat_set<int>{}, s1));
+            CHECK(set_is_strict_subset_of(flat_set<int>{}, s1));
+            CHECK_FALSE(set_is_subset_of(s1, s2));
+            CHECK_FALSE(set_is_subset_of(s1, flat_set<int>{}));
+            CHECK(set_is_subset_of(flat_set<int>{ 1, 4 }, s1));
+            CHECK(set_is_strict_subset_of(flat_set<int>{ 1, 4 }, s1));
+            CHECK(set_is_subset_of(s2, s1));
+            CHECK(set_is_strict_subset_of(s2, s1));
+        }
+
+        SUBCASE("Superset")
+        {
+            CHECK(set_is_superset_of(s1, s1));
+            CHECK_FALSE(set_is_strict_superset_of(s1, s1));
+            CHECK(set_is_superset_of(s1, flat_set<int>{}));
+            CHECK(set_is_strict_superset_of(s1, flat_set<int>{}));
+            CHECK_FALSE(set_is_superset_of(s2, s1));
+            CHECK_FALSE(set_is_superset_of(flat_set<int>{}, s1));
+            CHECK(set_is_superset_of(s1, flat_set<int>{ 1, 4 }));
+            CHECK(set_is_strict_superset_of(s1, flat_set<int>{ 1, 4 }));
+            CHECK(set_is_superset_of(s1, s2));
+            CHECK(set_is_strict_superset_of(s1, s2));
+        }
+
+        SUBCASE("Union")
+        {
+            CHECK_EQ(set_union(s1, s1), s1);
+            CHECK_EQ(set_union(s1, s2), s1);
+            CHECK_EQ(set_union(s2, s1), set_union(s1, s2));
+            CHECK_EQ(set_union(s1, s3), flat_set<int>{ 1, 3, 4, 5, 6 });
+            CHECK_EQ(set_union(s3, s1), set_union(s1, s3));
+            CHECK_EQ(set_union(s2, s3), flat_set<int>{ 3, 4, 5, 6 });
+            CHECK_EQ(set_union(s3, s2), set_union(s2, s3));
+        }
+
+        SUBCASE("Intersection")
+        {
+            CHECK_EQ(set_intersection(s1, s1), s1);
+            CHECK_EQ(set_intersection(s1, s2), s2);
+            CHECK_EQ(set_intersection(s2, s1), set_intersection(s1, s2));
+            CHECK_EQ(set_intersection(s1, s3), flat_set<int>{ 4 });
+            CHECK_EQ(set_intersection(s3, s1), set_intersection(s1, s3));
+            CHECK_EQ(set_intersection(s2, s3), flat_set<int>{});
+            CHECK_EQ(set_intersection(s3, s2), set_intersection(s2, s3));
+        }
+
+        SUBCASE("Difference")
+        {
+            CHECK_EQ(set_difference(s1, s1), flat_set<int>{});
+            CHECK_EQ(set_difference(s1, s2), flat_set<int>{ 1, 4 });
+            CHECK_EQ(set_difference(s2, s1), flat_set<int>{});
+            CHECK_EQ(set_difference(s1, s3), flat_set<int>{ 1, 3, 5 });
+            CHECK_EQ(set_difference(s3, s1), flat_set<int>{ 6 });
+            CHECK_EQ(set_difference(s2, s3), s2);
+            CHECK_EQ(set_difference(s3, s2), s3);
+        }
+
+        SUBCASE("Symmetric difference")
+        {
+            CHECK_EQ(set_symmetric_difference(s1, s1), flat_set<int>{});
+            CHECK_EQ(set_symmetric_difference(s1, s2), flat_set<int>{ 1, 4 });
+            CHECK_EQ(set_symmetric_difference(s2, s1), set_symmetric_difference(s1, s2));
+            CHECK_EQ(set_symmetric_difference(s1, s3), flat_set<int>{ 1, 3, 5, 6 });
+            CHECK_EQ(set_symmetric_difference(s3, s1), set_symmetric_difference(s1, s3));
+            CHECK_EQ(set_symmetric_difference(s2, s3), flat_set<int>{ 3, 4, 5, 6 });
+            CHECK_EQ(set_symmetric_difference(s3, s2), set_symmetric_difference(s2, s3));
+        }
+
+        SUBCASE("Algebra")
+        {
+            for (const auto& u : { s1, s2, s3 })
+            {
+                for (const auto& v : { s1, s2, s3 })
+                {
+                    CHECK_EQ(
+                        set_union(
+                            set_difference(u, v),
+                            set_union(set_difference(v, u), set_intersection(u, v))
+                        ),
+                        set_union(u, v)
+                    );
+                    CHECK_EQ(
+                        set_union(set_symmetric_difference(u, v), set_intersection(u, v)),
+                        set_union(u, v)
+                    );
+                    CHECK_EQ(
+                        set_difference(set_union(u, v), set_intersection(u, v)),
+                        set_symmetric_difference(u, v)
+                    );
+                }
+            }
+        }
     }
 }

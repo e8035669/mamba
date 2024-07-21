@@ -7,11 +7,55 @@
 #ifndef MAMBA_UTIL_URL_HPP
 #define MAMBA_UTIL_URL_HPP
 
+#include <array>
+#include <functional>
 #include <string>
 #include <string_view>
 
+#include <tl/expected.hpp>
+
 namespace mamba::util
 {
+    namespace detail
+    {
+        // Working around MSVC limitation on private inheritance + using directive
+
+        enum class StripScheme : bool
+        {
+            no,
+            yes
+        };
+
+        enum class Credentials
+        {
+            Show,
+            Hide,
+            Remove,
+        };
+
+        struct Encode
+        {
+            inline static constexpr struct yes_type
+            {
+            } yes = {};
+
+            inline static constexpr struct no_type
+            {
+            } no = {};
+        };
+
+        struct Decode
+        {
+            inline static constexpr struct yes_type
+            {
+            } yes = {};
+
+            inline static constexpr struct no_type
+            {
+            } no = {};
+        };
+    }
+
     /**
      * Class representing a URL.
      *
@@ -21,20 +65,15 @@ namespace mamba::util
     {
     public:
 
-        // clang-format off
-        enum class StripScheme : bool { no, yes };
-        enum class HidePassword : bool { no, yes };
-        struct Encode
+        using StripScheme = detail::StripScheme;
+        using Credentials = detail::Credentials;
+        using Encode = detail::Encode;
+        using Decode = detail::Decode;
+
+        struct ParseError
         {
-            inline static constexpr struct yes_type {} yes = {};
-            inline static constexpr struct no_type {} no = {};
+            std::string what;
         };
-        struct Decode
-        {
-            inline static constexpr struct yes_type {} yes = {};
-            inline static constexpr struct no_type {} no = {};
-        };
-        // clang-format on
 
         inline static constexpr std::string_view https = "https";
         inline static constexpr std::string_view localhost = "localhost";
@@ -45,28 +84,37 @@ namespace mamba::util
          * The fields of the URL must be percent encoded, otherwise use the individual
          * field setters to encode.
          * For instance, "https://user@email.com@mamba.org/" must be passed as
-         *"https://user%40email.com@mamba.org/".The first '@' charater is part of the username
+         *"https://user%40email.com@mamba.org/".The first '@' character is part of the username
          * "user@email.com" whereas the second is the URL specification for separating username
          * and hostname.
          *
          * @see Encode
          * @see mamba::util::url_encode
          */
-        [[nodiscard]] static auto parse(std::string_view url) -> URL;
+        [[nodiscard]] static auto parse(std::string_view url) -> tl::expected<URL, ParseError>;
 
         /** Create a local URL. */
         URL() = default;
 
+        /** Return whether the scheme is defaulted, i.e. not explicitly set. */
+        [[nodiscard]] auto scheme_is_defaulted() const -> bool;
+
         /** Return the scheme, always non-empty. */
-        [[nodiscard]] auto scheme() const -> const std::string&;
+        [[nodiscard]] auto scheme() const -> std::string_view;
 
         /** Set a non-empty scheme. */
         void set_scheme(std::string_view scheme);
 
+        /** Clear the scheme back to a defaulted value and return the old value. */
+        auto clear_scheme() -> std::string;
+
+        /** Return whether the user is empty. */
+        [[nodiscard]] auto has_user() const -> bool;
+
         /** Return the encoded user, or empty if none. */
         [[nodiscard]] auto user(Decode::no_type) const -> const std::string&;
 
-        /** Retrun the decoded user, or empty if none. */
+        /** Return the decoded user, or empty if none. */
         [[nodiscard]] auto user(Decode::yes_type = Decode::yes) const -> std::string;
 
         /** Set the user from a not encoded value. */
@@ -77,6 +125,9 @@ namespace mamba::util
 
         /** Clear and return the encoded user. */
         auto clear_user() -> std::string;
+
+        /** Return whether the password is empty. */
+        [[nodiscard]] auto has_password() const -> bool;
 
         /** Return the encoded password, or empty if none. */
         [[nodiscard]] auto password(Decode::no_type) const -> const std::string&;
@@ -95,6 +146,9 @@ namespace mamba::util
 
         /** Return the encoded basic authentication string. */
         [[nodiscard]] auto authentication() const -> std::string;
+
+        /** Return whether the host was defaulted, i.e. not explicitly set. */
+        [[nodiscard]] auto host_is_defaulted() const -> bool;
 
         /** Return the encoded host, always non-empty except for file scheme. */
         [[nodiscard]] auto host(Decode::no_type) const -> std::string_view;
@@ -120,8 +174,8 @@ namespace mamba::util
         /** Clear and return the port number. */
         auto clear_port() -> std::string;
 
-        /** Return the encoded autority part of the URL. */
-        [[nodiscard]] auto authority() const -> std::string;
+        /** Return the encoded authority part of the URL. */
+        [[nodiscard]] auto authority(Credentials = Credentials::Hide) const -> std::string;
 
         /** Return the encoded path, always starts with a '/'. */
         [[nodiscard]] auto path(Decode::no_type) const -> const std::string&;
@@ -188,26 +242,41 @@ namespace mamba::util
         auto clear_fragment() -> std::string;
 
         /** Return the full, exact, encoded URL. */
-        [[nodiscard]] auto str() -> std::string;
+        [[nodiscard]] auto str(Credentials credentials = Credentials::Hide) const -> std::string;
 
         /**
          * Return the full decoded url.
          *
-         * Due to decoding, the outcome may not be understood by parser and usable to reach an
-         * asset.
+         * Due to decoding, the outcome may not be understood by parser and usable to fetch the URL.
          * @param strip_scheme If true, remove the scheme and "localhost" on file URI.
-         * @param rstrip_path If non-null, remove the given charaters at the end of the path.
-         * @param hide_password If true, hide password in the decoded string.
+         * @param rstrip_path If non-null, remove the given characters at the end of the path.
+         * @param credentials Decide to keep, remove, or hide credentials.
          */
         [[nodiscard]] auto pretty_str(
             StripScheme strip_scheme = StripScheme::no,
             char rstrip_path = 0,
-            HidePassword hide_password = HidePassword::no
+            Credentials credentials = Credentials::Hide
         ) const -> std::string;
+
+    protected:
+
+        [[nodiscard]] auto
+            authentication_elems(Credentials, Decode::no_type) const -> std::array<std::string_view, 3>;
+        [[nodiscard]] auto
+            authentication_elems(Credentials, Decode::yes_type) const -> std::array<std::string, 3>;
+
+        [[nodiscard]] auto
+            authority_elems(Credentials, Decode::no_type) const -> std::array<std::string_view, 7>;
+        [[nodiscard]] auto
+            authority_elems(Credentials, Decode::yes_type) const -> std::array<std::string, 7>;
+
+        [[nodiscard]] auto
+        pretty_str_path(StripScheme strip_scheme = StripScheme::no, char rstrip_path = 0) const
+            -> std::string;
 
     private:
 
-        std::string m_scheme = std::string(https);
+        std::string m_scheme = {};
         std::string m_user = {};
         std::string m_password = {};
         std::string m_host = {};
@@ -217,6 +286,7 @@ namespace mamba::util
         std::string m_fragment = {};
     };
 
+    /** Tuple-like equality of all observable members */
     auto operator==(URL const& a, URL const& b) -> bool;
     auto operator!=(URL const& a, URL const& b) -> bool;
 
@@ -224,4 +294,10 @@ namespace mamba::util
     auto operator/(URL const& url, std::string_view subpath) -> URL;
     auto operator/(URL&& url, std::string_view subpath) -> URL;
 }
+
+template <>
+struct std::hash<mamba::util::URL>
+{
+    auto operator()(const mamba::util::URL& p) const -> std::size_t;
+};
 #endif

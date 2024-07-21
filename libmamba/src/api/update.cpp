@@ -4,19 +4,90 @@
 //
 // The full license is in the file LICENSE, distributed with this software.
 
+
 #include "mamba/api/channel_loader.hpp"
 #include "mamba/api/configuration.hpp"
 #include "mamba/api/update.hpp"
-#include "mamba/core/channel.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/context.hpp"
+#include "mamba/core/package_database_loader.hpp"
 #include "mamba/core/pinning.hpp"
 #include "mamba/core/transaction.hpp"
 #include "mamba/core/virtual_packages.hpp"
-#include "mamba/util/string.hpp"
+#include "mamba/solver/libsolv/database.hpp"
+#include "mamba/solver/libsolv/solver.hpp"
+#include "mamba/solver/request.hpp"
 
 namespace mamba
 {
-    void update(Configuration& config, bool update_all, bool prune)
+    namespace
+    {
+        auto create_update_request(
+            PrefixData& prefix_data,
+            std::vector<std::string> specs,
+            bool update_all,
+            bool prune_deps,
+            bool remove_not_specified
+        ) -> solver::Request
+        {
+            using Request = solver::Request;
+
+            auto request = Request();
+
+            if (update_all)
+            {
+                if (prune_deps)
+                {
+                    auto hist_map = prefix_data.history().get_requested_specs_map();
+                    request.jobs.reserve(hist_map.size() + 1);
+
+                    for (auto& [name, spec] : hist_map)
+                    {
+                        request.jobs.emplace_back(Request::Keep{ std::move(spec) });
+                    }
+                    request.jobs.emplace_back(Request::UpdateAll{ /* .clean_dependencies= */ true });
+                }
+                else
+                {
+                    request.jobs.emplace_back(Request::UpdateAll{ /* .clean_dependencies= */ false });
+                }
+            }
+            else
+            {
+                request.jobs.reserve(specs.size());
+                if (remove_not_specified)
+                {
+                    auto hist_map = prefix_data.history().get_requested_specs_map();
+                    for (auto& it : hist_map)
+                    {
+                        if (std::find(specs.begin(), specs.end(), it.second.name().str())
+                            == specs.end())
+                        {
+                            request.jobs.emplace_back(Request::Remove{
+                                specs::MatchSpec::parse(it.second.name().str())
+                                    .or_else([](specs::ParseError&& err) { throw std::move(err); })
+                                    .value(),
+                                /* .clean_dependencies= */ true,
+                            });
+                        }
+                    }
+                }
+
+                for (const auto& raw_ms : specs)
+                {
+                    request.jobs.emplace_back(Request::Update{
+                        specs::MatchSpec::parse(raw_ms)
+                            .or_else([](specs::ParseError&& err) { throw std::move(err); })
+                            .value(),
+                    });
+                }
+            }
+
+            return request;
+        }
+    }
+
+    void update(Configuration& config, bool update_all, bool prune_deps, bool remove_not_specified)
     {
         auto& ctx = config.context();
 
@@ -28,25 +99,25 @@ namespace mamba
             );
         config.load();
 
-        auto update_specs = config.at("specs").value<std::vector<std::string>>();
+        const auto& raw_update_specs = config.at("specs").value<std::vector<std::string>>();
 
-        ChannelContext channel_context{ ctx };
+        auto channel_context = ChannelContext::make_conda_compatible(ctx);
 
         // add channels from specs
-        for (const auto& s : update_specs)
+        for (const auto& s : raw_update_specs)
         {
-            if (auto m = MatchSpec{ s, channel_context }; !m.channel.empty())
+            if (auto ms = specs::MatchSpec::parse(s); ms && ms->channel().has_value())
             {
-                ctx.channels.push_back(m.channel);
+                ctx.channels.push_back(ms->channel()->str());
             }
         }
 
-        int solver_flag = SOLVER_UPDATE;
+        solver::libsolv::Database db{ channel_context.params() };
+        add_spdlog_logger_to_database(db);
 
-        MPool pool{ channel_context };
         MultiPackageCache package_caches(ctx.pkgs_dirs, ctx.validation_params);
 
-        auto exp_loaded = load_channels(pool, package_caches, 0);
+        auto exp_loaded = load_channels(ctx, channel_context, db, package_caches);
         if (!exp_loaded)
         {
             throw std::runtime_error(exp_loaded.error().what());
@@ -66,72 +137,55 @@ namespace mamba
             prefix_pkgs.push_back(it.first);
         }
 
-        prefix_data.add_packages(get_virtual_packages(ctx));
+        load_installed_packages_in_database(ctx, db, prefix_data);
 
-        MRepo(pool, prefix_data);
-
-        MSolver solver(
-            pool,
-            {
-                { SOLVER_FLAG_ALLOW_DOWNGRADE, ctx.allow_downgrade },
-                { SOLVER_FLAG_ALLOW_UNINSTALL, ctx.allow_uninstall },
-                { SOLVER_FLAG_STRICT_REPO_PRIORITY, ctx.channel_priority == ChannelPriority::kStrict },
-            }
+        auto request = create_update_request(
+            prefix_data,
+            raw_update_specs,
+            /* update_all= */ update_all,
+            /* prune_deps= */ prune_deps,
+            /* remove_not_specified= */ remove_not_specified
+        );
+        add_pins_to_request(
+            request,
+            ctx,
+            prefix_data,
+            raw_update_specs,
+            /* no_pin= */ config.at("no_pin").value<bool>(),
+            /* no_py_pin = */ config.at("no_py_pin").value<bool>()
         );
 
-        auto& no_pin = config.at("no_pin").value<bool>();
-        auto& no_py_pin = config.at("no_py_pin").value<bool>();
+        request.flags = ctx.solver_flags;
 
-        if (!no_pin)
         {
-            solver.add_pins(file_pins(prefix_data.path() / "conda-meta" / "pinned"));
-            solver.add_pins(ctx.pinned_packages);
+            auto out = Console::stream();
+            print_request_pins_to(request, out);
+            // Console stream prints on destruction
         }
 
-        if (!no_py_pin)
+        auto outcome = solver::libsolv::Solver().solve(db, request).value();
+        if (auto* unsolvable = std::get_if<solver::libsolv::UnSolvable>(&outcome))
         {
-            auto py_pin = python_pin(prefix_data, update_specs);
-            if (!py_pin.empty())
+            if (ctx.output_params.json)
             {
-                solver.add_pin(py_pin);
+                Console::instance().json_write({ { "success", false },
+                                                 { "solver_problems", unsolvable->problems(db) } });
             }
-        }
-        if (!solver.pinned_specs().empty())
-        {
-            std::vector<std::string> pinned_str;
-            for (auto& ms : solver.pinned_specs())
-            {
-                pinned_str.push_back("  - " + ms.conda_build_form() + "\n");
-            }
-            Console::instance().print("\nPinned packages:\n" + util::join("", pinned_str));
+            throw mamba_error(
+                "Could not solve for environment specs",
+                mamba_error_code::satisfiablitity_error
+            );
         }
 
-        // FRAGILE this must be called after pins be before jobs in current ``MPool``
-        pool.create_whatprovides();
+        Console::instance().json_write({ { "success", true } });
+        auto transaction = MTransaction(
+            ctx,
+            db,
+            request,
+            std::get<solver::Solution>(outcome),
+            package_caches
+        );
 
-        if (update_all)
-        {
-            auto hist_map = prefix_data.history().get_requested_specs_map();
-            std::vector<std::string> keep_specs;
-            for (auto& it : hist_map)
-            {
-                keep_specs.push_back(it.second.name);
-            }
-            solver_flag |= SOLVER_SOLVABLE_ALL;
-            if (prune)
-            {
-                solver_flag |= SOLVER_CLEANDEPS;
-            }
-            solver.add_jobs(keep_specs, SOLVER_USERINSTALLED);
-            solver.add_global_job(solver_flag);
-        }
-        else
-        {
-            solver.add_jobs(update_specs, solver_flag);
-        }
-
-
-        solver.must_solve();
 
         auto execute_transaction = [&](MTransaction& transaction)
         {
@@ -140,14 +194,13 @@ namespace mamba
                 transaction.log_json();
             }
 
-            bool yes = transaction.prompt();
+            bool yes = transaction.prompt(ctx, channel_context);
             if (yes)
             {
-                transaction.execute(prefix_data);
+                transaction.execute(ctx, channel_context, prefix_data);
             }
         };
 
-        MTransaction transaction(pool, solver, package_caches);
         execute_transaction(transaction);
     }
 }

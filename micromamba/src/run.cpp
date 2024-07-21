@@ -19,7 +19,7 @@
 #include "mamba/core/error_handling.hpp"
 #include "mamba/core/execution.hpp"
 #include "mamba/core/util_os.hpp"
-#include "mamba/core/util_random.hpp"
+#include "mamba/util/random.hpp"
 
 #include "common_options.hpp"
 
@@ -40,7 +40,6 @@ extern "C"
 #include "mamba/core/run.hpp"
 
 using namespace mamba;  // NOLINT(build/namespaces)
-
 
 void
 set_ps_command(CLI::App* subcom, Context& context)
@@ -211,7 +210,7 @@ set_run_command(CLI::App* subcom, Configuration& config)
 
             auto& ctx = config.context();
 
-            auto const get_prefix = [&]()
+            const auto get_prefix = [&]()
             {
                 if (auto prefix = ctx.prefix_params.target_prefix; !prefix.empty())
                 {

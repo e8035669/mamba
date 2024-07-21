@@ -12,30 +12,89 @@ using namespace mamba::specs;
 
 TEST_SUITE("specs::platform")
 {
-    TEST_CASE("name")
+    TEST_CASE("KnownPlatform")
     {
-        CHECK_EQ(platform_name(Platform::linux_riscv32), "linux-riscv32");
-        CHECK_EQ(platform_name(Platform::osx_arm64), "osx-arm64");
-        CHECK_EQ(platform_name(Platform::win_64), "win-64");
+        SUBCASE("name")
+        {
+            CHECK_EQ(platform_name(KnownPlatform::linux_riscv32), "linux-riscv32");
+            CHECK_EQ(platform_name(KnownPlatform::osx_arm64), "osx-arm64");
+            CHECK_EQ(platform_name(KnownPlatform::win_64), "win-64");
+        }
+
+        SUBCASE("parse")
+        {
+            CHECK_EQ(platform_parse("linux-armv6l"), KnownPlatform::linux_armv6l);
+            CHECK_EQ(platform_parse(" win-32 "), KnownPlatform::win_32);
+            CHECK_EQ(platform_parse(" OSX-64"), KnownPlatform::osx_64);
+            CHECK_EQ(platform_parse("linus-46"), std::nullopt);
+        }
+
+        SUBCASE("known_platform")
+        {
+            static constexpr decltype(known_platform_names()) expected{
+                "noarch",        "linux-32",      "linux-64",    "linux-armv6l", "linux-armv7l",
+                "linux-aarch64", "linux-ppc64le", "linux-ppc64", "linux-s390x",  "linux-riscv32",
+                "linux-riscv64", "osx-64",        "osx-arm64",   "win-32",       "win-64",
+                "win-arm64",     "zos-z",
+
+            };
+            CHECK_EQ(expected, known_platform_names());
+        }
     }
 
-    TEST_CASE("parse")
+    TEST_CASE("platform_is_xxx")
     {
-        CHECK_EQ(platform_parse("linux-armv6l"), Platform::linux_armv6l);
-        CHECK_EQ(platform_parse(" win-32 "), Platform::win_32);
-        CHECK_EQ(platform_parse(" OSX-64"), Platform::osx_64);
-        CHECK_EQ(platform_parse("linus-46"), std::nullopt);
+        SUBCASE("KnownPlatform")
+        {
+            // Making sure no-one forgot to add the platform with a specific OS
+            for (auto plat : known_platforms())
+            {
+                auto check = platform_is_linux(plat)             //
+                             || platform_is_osx(plat)            //
+                             || platform_is_win(plat)            //
+                             || (plat == KnownPlatform::noarch)  //
+                             || (plat == KnownPlatform::zos_z);
+                CHECK(check);
+            }
+        }
+
+        SUBCASE("DynamicPlatform")
+        {
+            CHECK_FALSE(platform_is_linux("win-64"));
+            CHECK_FALSE(platform_is_linux("osx-64"));
+            CHECK(platform_is_linux("linux-64"));
+
+            CHECK_FALSE(platform_is_osx("win-64"));
+            CHECK(platform_is_osx("osx-64"));
+            CHECK_FALSE(platform_is_osx("linux-64"));
+
+            CHECK(platform_is_win("win-64"));
+            CHECK_FALSE(platform_is_win("osx-64"));
+            CHECK_FALSE(platform_is_win("linux-64"));
+        }
     }
 
-    TEST_CASE("known_platform")
+    TEST_CASE("NoArch")
     {
-        static constexpr decltype(known_platform_names()) expected{
-            "noarch",       "linux-32",      "linux-64",      "linux-armv6l",
-            "linux-armv7l", "linux-aarch64", "linux-ppc64le", "linux-ppc64",
-            "linux-s390x",  "linux-riscv32", "linux-riscv64", "osx-64",
-            "osx-arm64",    "win-32",        "win-64",        "win-arm64",
+        SUBCASE("name")
+        {
+            CHECK_EQ(noarch_name(NoArchType::No), "no");
+            CHECK_EQ(noarch_name(NoArchType::Generic), "generic");
+            CHECK_EQ(noarch_name(NoArchType::Python), "python");
+        }
 
-        };
-        CHECK_EQ(expected, known_platform_names());
+        SUBCASE("parse")
+        {
+            CHECK_EQ(noarch_parse(""), std::nullopt);
+            CHECK_EQ(noarch_parse(" Python "), NoArchType::Python);
+            CHECK_EQ(noarch_parse(" geNeric"), NoArchType::Generic);
+            CHECK_EQ(noarch_parse("Nothing we know"), std::nullopt);
+        }
+
+        SUBCASE("known_noarch")
+        {
+            static constexpr decltype(known_noarch_names()) expected{ "no", "generic", "python" };
+            CHECK_EQ(expected, known_noarch_names());
+        }
     }
 }

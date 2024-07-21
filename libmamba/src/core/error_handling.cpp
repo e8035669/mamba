@@ -46,7 +46,6 @@ namespace mamba
         maybe_dump_backtrace(m_error_code);
     }
 
-
     mamba_error_code mamba_error::error_code() const noexcept
     {
         return m_error_code;
@@ -57,7 +56,7 @@ namespace mamba
         return m_data;
     }
 
-    constexpr const char* mamba_aggregated_error::m_base_message;  // = "Many errors occured:\n";
+    constexpr const char* mamba_aggregated_error::m_base_message;  // = "Many errors occurred:\n";
 
     mamba_aggregated_error::mamba_aggregated_error(error_list_t&& error_list)
         : base_type(mamba_aggregated_error::m_base_message, mamba_error_code::aggregated)
@@ -80,7 +79,6 @@ namespace mamba
         }
         return m_aggregated_message.c_str();
     }
-
 
     tl::unexpected<mamba_error> make_unexpected(const char* msg, mamba_error_code ec)
     {

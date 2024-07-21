@@ -8,12 +8,12 @@
 
 #include <CLI/App.hpp>
 
-#include "mamba/core/environment.hpp"
 #include "mamba/core/output.hpp"
 #include "mamba/core/util.hpp"
+#include "mamba/util/encoding.hpp"
+#include "mamba/util/environment.hpp"
 #include "mamba/util/string.hpp"
 #include "mamba/util/url.hpp"
-
 
 std::string
 read_stdin()
@@ -36,7 +36,7 @@ read_stdin()
 std::string
 get_token_base(const std::string& host)
 {
-    const auto url = mamba::util::URL::parse(host);
+    const auto url = mamba::util::URL::parse(host).value();
 
     std::string maybe_colon_and_port{};
     if (!url.port().empty())
@@ -63,14 +63,14 @@ set_logout_command(CLI::App* subcom)
     subcom->callback(
         []()
         {
-            static auto path = mamba::env::home_directory() / ".mamba" / "auth";
-            fs::u8path auth_file = path / "authentication.json";
+            static auto path = mamba::fs::u8path(mamba::util::user_home_dir()) / ".mamba" / "auth";
+            const mamba::fs::u8path auth_file = path / "authentication.json";
 
             if (all)
             {
-                if (fs::exists(auth_file))
+                if (mamba::fs::exists(auth_file))
                 {
-                    fs::remove(auth_file);
+                    mamba::fs::remove(auth_file);
                 }
                 return 0;
             }
@@ -79,7 +79,7 @@ set_logout_command(CLI::App* subcom)
 
             try
             {
-                if (fs::exists(auth_file))
+                if (mamba::fs::exists(auth_file))
                 {
                     auto fi = mamba::open_ifstream(auth_file);
                     fi >> auth_info;
@@ -157,16 +157,17 @@ set_login_command(CLI::App* subcom)
                 bearer = read_stdin();
             }
 
-            static auto path = mamba::env::home_directory() / ".mamba" / "auth";
-            fs::create_directories(path);
+            static const auto path = mamba::fs::u8path(mamba::util::user_home_dir()) / ".mamba"
+                                     / "auth";
+            mamba::fs::create_directories(path);
 
 
             nlohmann::json auth_info;
-            fs::u8path auth_file = path / "authentication.json";
+            const mamba::fs::u8path auth_file = path / "authentication.json";
 
             try
             {
-                if (fs::exists(auth_file))
+                if (mamba::fs::exists(auth_file))
                 {
                     auto fi = mamba::open_ifstream(auth_file);
                     fi >> auth_info;
@@ -186,7 +187,7 @@ set_login_command(CLI::App* subcom)
                 {
                     auth_object["type"] = "BasicHTTPAuthentication";
 
-                    auto pass_encoded = mamba::encode_base64(mamba::util::strip(pass));
+                    auto pass_encoded = mamba::util::encode_base64(mamba::util::strip(pass));
                     if (!pass_encoded)
                     {
                         throw pass_encoded.error();

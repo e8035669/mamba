@@ -7,12 +7,12 @@
 #ifndef MAMBA_CORE_ACTIVATION_HPP
 #define MAMBA_CORE_ACTIVATION_HPP
 
-#include <map>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
-#include "mamba_fs.hpp"
+#include "mamba/fs/filesystem.hpp"
 
 // TODO write a map that keeps insertion order
 
@@ -101,7 +101,7 @@ namespace mamba
         bool m_stack = false;
         ActivationType m_action;
 
-        std::map<std::string, std::string> m_env;
+        std::unordered_map<std::string, std::string> m_env;
     };
 
     class PosixActivator : public Activator
@@ -112,6 +112,7 @@ namespace mamba
             : Activator(context)
         {
         }
+
         virtual ~PosixActivator() = default;
 
         std::string script(const EnvironmentTransform& env_transform) override;
@@ -133,6 +134,7 @@ namespace mamba
             : Activator(context)
         {
         }
+
         virtual ~CshActivator() = default;
 
         std::string script(const EnvironmentTransform& env_transform) override;
@@ -154,6 +156,7 @@ namespace mamba
             : Activator(context)
         {
         }
+
         virtual ~CmdExeActivator() = default;
 
         std::string script(const EnvironmentTransform& env_transform) override;
@@ -175,6 +178,7 @@ namespace mamba
             : Activator(context)
         {
         }
+
         virtual ~PowerShellActivator() = default;
 
         std::string script(const EnvironmentTransform& env_transform) override;
@@ -196,6 +200,7 @@ namespace mamba
             : Activator(context)
         {
         }
+
         virtual ~XonshActivator() = default;
 
         std::string script(const EnvironmentTransform& env_transform) override;
@@ -217,6 +222,7 @@ namespace mamba
             : Activator(context)
         {
         }
+
         virtual ~FishActivator() = default;
 
         std::string script(const EnvironmentTransform& env_transform) override;
@@ -230,6 +236,27 @@ namespace mamba
         fs::u8path hook_source_path() override;
     };
 
+    class NuActivator : public Activator
+    {
+    public:
+
+        explicit NuActivator(const Context& context)
+            : Activator(context)
+        {
+        }
+
+        virtual ~NuActivator() = default;
+
+        std::string script(const EnvironmentTransform& env_transform) override;
+        std::pair<std::string, std::string>
+        update_prompt(const std::string& conda_prompt_modifier) override;
+        std::string shell_extension() override;
+        std::string shell() override;
+
+        std::string hook_preamble() override;
+        std::string hook_postamble() override;
+        fs::u8path hook_source_path() override;
+    };
 
     std::vector<fs::u8path> get_path_dirs(const fs::u8path& prefix);
 

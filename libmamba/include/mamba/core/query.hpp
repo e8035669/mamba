@@ -7,101 +7,71 @@
 #ifndef MAMBA_CORE_QUERY_HPP
 #define MAMBA_CORE_QUERY_HPP
 
+#include <iosfwd>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
-#include <solv/pool.h>
-#include <solv/repo.h>
-#include <solv/selection.h>
-#include <solv/solver.h>
-extern "C"  // Incomplete header
-{
-#include <solv/conda.h>
-}
-
 #include "mamba/core/context.hpp"
-#include "mamba/core/package_info.hpp"
-#include "mamba/core/pool.hpp"
+#include "mamba/specs/package_info.hpp"
 #include "mamba/util/graph.hpp"
 
 namespace mamba
 {
-    using GraphicsParams = Context::GraphicsParams;
-
-    void print_dep_graph(
-        std::ostream& out,
-        Solvable* s,
-        const std::string& solv_str,
-        int level,
-        int max_level,
-        bool last,
-        const std::string& prefix
-    );
-
-    class query_result;
-
-    class Query
+    namespace solver::libsolv
     {
-    public:
-
-        Query(MPool& pool);
-
-        query_result find(const std::string& query) const;
-        query_result whoneeds(const std::string& query, bool tree) const;
-        query_result depends(const std::string& query, bool tree) const;
-
-    private:
-
-        std::reference_wrapper<MPool> m_pool;
-    };
+        class Database;
+    }
 
     enum class QueryType
     {
-        kSEARCH,
-        kDEPENDS,
-        kWHONEEDS
+        Search,
+        Depends,
+        WhoNeeds
     };
 
-    enum class QueryResultFormat
-    {
-        kJSON = 0,
-        kTREE = 1,
-        kTABLE = 2,
-        kPRETTY = 3,
-        kRECURSIVETABLE = 4,
-    };
+    constexpr auto enum_name(QueryType t) -> std::string_view;
 
-    class query_result
+    auto query_type_parse(std::string_view name) -> QueryType;
+
+    class QueryResult
     {
     public:
 
-        using dependency_graph = util::DiGraph<PackageInfo>;
+        using GraphicsParams = Context::GraphicsParams;
+        using dependency_graph = util::DiGraph<specs::PackageInfo>;
 
-        query_result(QueryType type, const std::string& query, dependency_graph&& dep_graph);
+        QueryResult(QueryType type, std::string query, dependency_graph dep_graph);
+        QueryResult(const QueryResult&) = default;
+        QueryResult(QueryResult&&) = default;
 
-        ~query_result() = default;
+        ~QueryResult() = default;
 
-        query_result(const query_result&) = default;
-        query_result& operator=(const query_result&) = default;
-        query_result(query_result&&) = default;
-        query_result& operator=(query_result&&) = default;
+        auto operator=(const QueryResult&) -> QueryResult& = default;
+        auto operator=(QueryResult&&) -> QueryResult& = default;
 
-        QueryType query_type() const;
-        const std::string& query() const;
+        [[nodiscard]] auto type() const -> QueryType;
+        [[nodiscard]] auto query() const -> const std::string&;
+        [[nodiscard]] auto empty() const -> bool;
 
-        query_result& sort(std::string field);
-        query_result& groupby(std::string field);
-        query_result& reset();
+        auto sort(std::string_view field) -> QueryResult&;
 
-        std::ostream& table(std::ostream&) const;
-        std::ostream& table(std::ostream&, const std::vector<std::string_view>& fmt) const;
-        std::ostream& tree(std::ostream&, const GraphicsParams& graphics) const;
-        nlohmann::json json(ChannelContext& channel_context) const;
+        auto groupby(std::string_view field) -> QueryResult&;
 
-        std::ostream& pretty(std::ostream&) const;
+        auto reset() -> QueryResult&;
 
-        bool empty() const;
+        auto table(std::ostream&) const -> std::ostream&;
+        auto table(std::ostream&, const std::vector<std::string_view>& fmt) const -> std::ostream&;
+        [[nodiscard]] auto table_to_str() const -> std::string;
+
+        auto tree(std::ostream&, const GraphicsParams& graphics) const -> std::ostream&;
+        [[nodiscard]] auto tree_to_str(const GraphicsParams& graphics) const -> std::string;
+
+        [[nodiscard]] auto json() const -> nlohmann::json;
+
+        auto pretty(std::ostream&, bool show_all_builds) const -> std::ostream&;
+        [[nodiscard]] auto pretty_to_str(bool show_all_builds) const -> std::string;
 
     private:
 
@@ -110,7 +80,6 @@ namespace mamba
         using ordered_package_list = std::map<std::string, package_id_list>;
 
         void reset_pkg_view_list();
-        std::string get_package_repr(const PackageInfo& pkg) const;
 
         QueryType m_type;
         std::string m_query;
@@ -118,6 +87,37 @@ namespace mamba
         package_id_list m_pkg_id_list = {};
         ordered_package_list m_ordered_pkg_id_list = {};
     };
-}  // namespace mamba
 
-#endif  // MAMBA_QUERY_HPP
+    class Query
+    {
+    public:
+
+        using Database = solver::libsolv::Database;
+
+        [[nodiscard]] static auto
+        find(Database& db, const std::vector<std::string>& queries) -> QueryResult;
+
+        [[nodiscard]] static auto whoneeds(Database& db, std::string query, bool tree) -> QueryResult;
+
+        [[nodiscard]] static auto depends(Database& db, std::string query, bool tree) -> QueryResult;
+    };
+
+    /********************
+     *  Implementation  *
+     ********************/
+
+    constexpr auto enum_name(QueryType t) -> std::string_view
+    {
+        switch (t)
+        {
+            case QueryType::Search:
+                return "Search";
+            case QueryType::WhoNeeds:
+                return "WhoNeeds";
+            case QueryType::Depends:
+                return "Depends";
+        }
+        throw std::invalid_argument("Invalid enum value");
+    }
+}
+#endif

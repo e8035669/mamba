@@ -1,4 +1,6 @@
-# script to release any of the mamba packages
+# Script to release any of the mamba packages
+# Please refer to `update_changelog.py` for more info about the release process
+
 import copy
 import datetime
 import re
@@ -8,8 +10,7 @@ template = {"version": None, "changes": []}
 templates = {
     "libmamba": "libmamba/include/mamba/version.hpp.tmpl",
     "micromamba": "micromamba/src/version.hpp.tmpl",
-    "libmambapy": "libmambapy/libmambapy/_version.py.tmpl",
-    "mamba": "mamba/mamba/_version.py.tmpl",
+    "libmambapy": "libmambapy/src/libmambapy/version.py.tmpl",
 }
 
 
@@ -125,7 +126,7 @@ def main():
             release_start = idx + 1
             break
 
-    brackets_re = re.compile(r"\[(.*)\]")
+    brackets_re = re.compile(r"\[(.*?)\]")
 
     # section with groups, heading + items
     sections = []
@@ -162,9 +163,7 @@ def main():
             else:
                 sections[-1].items.append(Item())
                 sections[-1].items[-1].text = c[m.end() :].strip()
-                sections[-1].items[-1].applies_to = [
-                    x.strip() for x in m.groups(1)[0].split(",")
-                ]
+                sections[-1].items[-1].applies_to = [x.strip() for x in m.groups(1)[0].split(",")]
 
         else:
             if c.startswith(" "):

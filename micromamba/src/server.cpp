@@ -16,7 +16,7 @@
 
 #include "mamba/api/channel_loader.hpp"
 #include "mamba/api/configuration.hpp"
-#include "mamba/core/channel.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/context.hpp"
 #include "mamba/core/solver.hpp"
 #include "mamba/core/transaction.hpp"
@@ -31,17 +31,17 @@
 
 using namespace mamba;
 
-MPool
+Database
 load_pool(
     const std::vector<std::string>& channels,
     MultiPackageCache& package_caches,
+    mamba::Context& ctx,
     mamba::ChannelContext& channel_context
 )
 {
-    auto& ctx = channel_context.context();
     ctx.channels = channels;
-    mamba::MPool pool{ channel_context };
-    auto exp_load = load_channels(pool, package_caches, false);
+    mamba::Database pool{ ctx, channel_context };
+    auto exp_load = load_channels(ctx, pool, package_caches, false);
     if (!exp_load)
     {
         throw std::runtime_error(exp_load.error().what());
@@ -53,14 +53,13 @@ void
 handle_solve_request(
     const microserver::Request& req,
     microserver::Response& res,
+    mamba::Context& ctx,
     mamba::ChannelContext& channel_context
 )
 {
-    auto& ctx = channel_context.context();
-
     struct cache
     {
-        std::optional<mamba::MPool> pool;
+        std::optional<mamba::Database> pool;
         std::chrono::time_point<std::chrono::system_clock> last_update;
     };
 
@@ -76,9 +75,9 @@ handle_solve_request(
 
     for (const auto& s : specs)
     {
-        if (auto m = MatchSpec{ s, channel_context }; !m.channel.empty())
+        if (auto m = MatchSpec::parse(s); m.channel.has_value())
         {
-            channels.push_back(m.channel);
+            channels.push_back(m.channel->str());
         }
     }
 
@@ -89,7 +88,7 @@ handle_solve_request(
     {
         cache_map.insert_or_assign(
             cache_key,
-            cache{ load_pool(channels, package_caches, channel_context),
+            cache{ load_pool(channels, package_caches, ctx, channel_context),
                    std::chrono::system_clock::now() }
         );
     }
@@ -100,7 +99,7 @@ handle_solve_request(
         {
             cache_map.insert_or_assign(
                 cache_key,
-                cache{ load_pool(channels, package_caches, channel_context),
+                cache{ load_pool(channels, package_caches, ctx, channel_context),
                        std::chrono::system_clock::now() }
             );
         }
@@ -138,7 +137,7 @@ handle_solve_request(
         *cache_entry.pool,
         { { SOLVER_FLAG_ALLOW_UNINSTALL, ctx.allow_uninstall },
           { SOLVER_FLAG_ALLOW_DOWNGRADE, ctx.allow_downgrade },
-          { SOLVER_FLAG_STRICT_REPO_PRIORITY, ctx.channel_priority == ChannelPriority::kStrict } }
+          { SOLVER_FLAG_STRICT_REPO_PRIORITY, ctx.channel_priority == ChannelPriority::Strict } }
     );
 
     solver.add_jobs(specs, SOLVER_INSTALL);
@@ -169,9 +168,8 @@ handle_solve_request(
     pool_set_installed(*cache_entry.pool, nullptr);
 }
 
-
 int
-run_server(int port, mamba::ChannelContext& channel_context, Configuration& config)
+run_server(int port, mamba::Context& ctx, mamba::ChannelContext& channel_context, Configuration& config)
 {
     config.load();
     std::signal(SIGPIPE, SIG_IGN);
@@ -199,7 +197,7 @@ run_server(int port, mamba::ChannelContext& channel_context, Configuration& conf
     xserver.post(
         "/solve",
         [&](const microserver::Request& req, microserver::Response& res)
-        { return handle_solve_request(req, res, channel_context); }
+        { return handle_solve_request(req, res, ctx, channel_context); }
     );
 
     Console::stream() << "Starting server on port http://localhost:" << port << std::endl;
@@ -219,8 +217,8 @@ set_server_command(CLI::App* subcom, mamba::Configuration& config)
     subcom->callback(
         [&config]
         {
-            mamba::ChannelContext channel_context{ config.context() };
-            return run_server(port, channel_context, config);
+            auto channel_context = mamba::ChannelContext::make_conda_compatible(config.context());
+            return run_server(port, config.context(), channel_context, config);
         }
     );
 }

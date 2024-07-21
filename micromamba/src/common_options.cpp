@@ -31,7 +31,6 @@ init_rc_options(CLI::App* subcom, Configuration& config)
     subcom->add_flag("--no-env", no_env.get_cli_config<bool>(), no_env.description())->group(cli_group);
 }
 
-
 void
 init_general_options(CLI::App* subcom, Configuration& config)
 {
@@ -129,7 +128,6 @@ init_prefix_options(CLI::App* subcom, Configuration& config)
         ->group(cli_group);
 }
 
-
 void
 init_network_options(CLI::App* subcom, Configuration& config)
 {
@@ -173,7 +171,6 @@ init_network_options(CLI::App* subcom, Configuration& config)
         ->group(cli_group);
 }
 
-
 void
 init_channel_parser(CLI::App* subcom, Configuration& config)
 {
@@ -202,9 +199,9 @@ init_channel_parser(CLI::App* subcom, Configuration& config)
         override_channels.description()
     );
 
-    std::map<std::string, ChannelPriority> cp_map = { { "disabled", ChannelPriority::kDisabled },
-                                                      { "flexible", ChannelPriority::kFlexible },
-                                                      { "strict", ChannelPriority::kStrict } };
+    std::map<std::string, ChannelPriority> cp_map = { { "disabled", ChannelPriority::Disabled },
+                                                      { "flexible", ChannelPriority::Flexible },
+                                                      { "strict", ChannelPriority::Strict } };
     auto& channel_priority = config.at("channel_priority");
     subcom
         ->add_option(
@@ -288,7 +285,7 @@ strict_channel_priority_hook(Configuration& config, bool&)
     if (strict_channel_priority.configured())
     {
         if ((channel_priority.cli_configured() || channel_priority.env_var_configured())
-            && (channel_priority.cli_value<ChannelPriority>() != ChannelPriority::kStrict))
+            && (channel_priority.cli_value<ChannelPriority>() != ChannelPriority::Strict))
         {
             throw std::runtime_error("Cannot set both 'strict_channel_priority' and 'channel_priority'."
             );
@@ -302,7 +299,7 @@ strict_channel_priority_hook(Configuration& config, bool&)
                 );
             }
             // Override 'channel_priority' CLI value
-            channel_priority.set_cli_value(ChannelPriority::kStrict);
+            channel_priority.set_cli_value(ChannelPriority::Strict);
         }
     }
 }
@@ -317,7 +314,7 @@ no_channel_priority_hook(Configuration& config, bool&)
     if (no_channel_priority.configured())
     {
         if ((channel_priority.cli_configured() || channel_priority.env_var_configured())
-            && (channel_priority.cli_value<ChannelPriority>() != ChannelPriority::kDisabled))
+            && (channel_priority.cli_value<ChannelPriority>() != ChannelPriority::Disabled))
         {
             throw std::runtime_error("Cannot set both 'no_channel_priority' and 'channel_priority'.");
         }
@@ -330,7 +327,7 @@ no_channel_priority_hook(Configuration& config, bool&)
                 );
             }
             // Override 'channel_priority' CLI value
-            channel_priority.set_cli_value(ChannelPriority::kDisabled);
+            channel_priority.set_cli_value(ChannelPriority::Disabled);
         }
     }
 }
@@ -401,13 +398,6 @@ init_install_options(CLI::App* subcom, Configuration& config)
         always_copy.description()
     );
 
-    auto& extra_safety_checks = config.at("extra_safety_checks");
-    subcom->add_flag(
-        "--extra-safety-checks,!--no-extra-safety-checks",
-        extra_safety_checks.get_cli_config<bool>(),
-        extra_safety_checks.description()
-    );
-
     auto& lock_timeout = config.at("lock_timeout");
     subcom->add_option(
         "--lock-timeout",
@@ -422,9 +412,9 @@ init_install_options(CLI::App* subcom, Configuration& config)
         shortcuts.description()
     );
 
-    std::map<std::string, VerificationLevel> vl_map = { { "enabled", VerificationLevel::kEnabled },
-                                                        { "warn", VerificationLevel::kWarn },
-                                                        { "disabled", VerificationLevel::kDisabled } };
+    std::map<std::string, VerificationLevel> vl_map = { { "enabled", VerificationLevel::Enabled },
+                                                        { "warn", VerificationLevel::Warn },
+                                                        { "disabled", VerificationLevel::Disabled } };
     auto& safety_checks = config.at("safety_checks");
     subcom
         ->add_option(
@@ -434,8 +424,31 @@ init_install_options(CLI::App* subcom, Configuration& config)
         )
         ->transform(CLI::CheckedTransformer(vl_map, CLI::ignore_case));
 
+    auto& extra_safety_checks = config.at("extra_safety_checks");
+    subcom->add_flag(
+        "--extra-safety-checks,!--no-extra-safety-checks",
+        extra_safety_checks.get_cli_config<bool>(),
+        extra_safety_checks.description()
+    );
+
     auto& av = config.at("verify_artifacts");
     subcom->add_flag("--verify-artifacts", av.get_cli_config<bool>(), av.description());
+
+    auto& trusted_channels = config.at("trusted_channels");
+    // Allowing unlimited number of args (may be modified later if needed using `type_size` and
+    // `allow_extra_args`)
+    subcom->add_option(
+        "--trusted-channels",
+        trusted_channels.get_cli_config<string_list>(),
+        trusted_channels.description()
+    );
+
+    auto& repo_parsing = config.at("experimental_repodata_parsing");
+    subcom->add_flag(
+        "--exp-repodata-parsing, !--no-exp-repodata-parsing",
+        repo_parsing.get_cli_config<bool>(),
+        repo_parsing.description()
+    );
 
     auto& platform = config.at("platform");
     subcom->add_option("--platform", platform.get_cli_config<std::string>(), platform.description());

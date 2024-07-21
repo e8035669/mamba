@@ -9,6 +9,7 @@
 #include "mamba/core/run.hpp"
 #include "mamba/core/shell_init.hpp"
 #include "mamba/util/build.hpp"
+#include "mamba/util/environment.hpp"
 
 #include "common_options.hpp"
 #include "umamba.hpp"
@@ -31,7 +32,7 @@ namespace
         subcmd
             ->add_option("-s,--shell", shell_type.get_cli_config<std::string>(), shell_type.description())
             ->check(CLI::IsMember(std::set<std::string>(
-                { "bash", "posix", "powershell", "cmd.exe", "xonsh", "zsh", "fish", "tcsh", "dash" }
+                { "bash", "posix", "powershell", "cmd.exe", "xonsh", "zsh", "fish", "tcsh", "dash", "nu" }
             )));
     }
 
@@ -39,9 +40,7 @@ namespace
     {
         auto& root = config.at("root_prefix");
         subcmd->add_option(
-            "root_prefix,-r,--root-prefix"
-            // TODO deprecated, remove in 2.0.0
-            ",--prefix,-p,--name,-n",
+            "root_prefix,-r,--root-prefix",
             root.get_cli_config<fs::u8path>(),
             root.description()
         );
@@ -326,7 +325,7 @@ namespace
         subcmd->callback(
             [all_subsubcmds, &config]()
             {
-                bool const got_subsubcmd = std::any_of(
+                const bool got_subsubcmd = std::any_of(
                     all_subsubcmds.cbegin(),
                     all_subsubcmds.cend(),
                     [](auto* subsubcmd) -> bool { return subsubcmd->parsed(); }
@@ -339,17 +338,17 @@ namespace
                     consolidate_prefix_options(config);
                     config.load();
 
-                    auto const get_shell = []() -> std::string
+                    const auto get_shell = []() -> std::string
                     {
                         if constexpr (util::on_win)
                         {
-                            return env::get("SHELL").value_or("cmd.exe");
+                            return util::get_env("SHELL").value_or("cmd.exe");
                         }
                         else if constexpr (util::on_mac)
                         {
-                            return env::get("SHELL").value_or("zsh");
+                            return util::get_env("SHELL").value_or("zsh");
                         }
-                        return env::get("SHELL").value_or("bash");
+                        return util::get_env("SHELL").value_or("bash");
                     };
 
                     exit(mamba::run_in_environment(

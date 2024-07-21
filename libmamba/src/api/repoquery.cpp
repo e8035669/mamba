@@ -9,157 +9,186 @@
 #include "mamba/api/channel_loader.hpp"
 #include "mamba/api/configuration.hpp"
 #include "mamba/api/repoquery.hpp"
-#include "mamba/core/channel.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/package_cache.hpp"
+#include "mamba/core/package_database_loader.hpp"
 #include "mamba/core/prefix_data.hpp"
-#include "mamba/core/repo.hpp"
+#include "mamba/solver/libsolv/database.hpp"
+#include "mamba/solver/libsolv/repo_info.hpp"
 #include "mamba/util/string.hpp"
 
 namespace mamba
 {
-    void repoquery(
-        Configuration& config,
-        QueryType type,
-        QueryResultFormat format,
-        bool use_local,
-        const std::string& query
-    )
+    namespace
     {
-        auto& ctx = config.context();
-
-        config.at("use_target_prefix_fallback").set_value(true);
-        config.at("target_prefix_checks")
-            .set_value(MAMBA_ALLOW_EXISTING_PREFIX | MAMBA_ALLOW_MISSING_PREFIX);
-        config.load();
-
-        ChannelContext channel_context{ ctx };
-        MPool pool{ channel_context };
-
-        // bool installed = (type == QueryType::kDepends) || (type == QueryType::kWhoneeds);
-        MultiPackageCache package_caches(ctx.pkgs_dirs, ctx.validation_params);
-        if (use_local)
+        auto
+        repoquery_init(Context& ctx, Configuration& config, QueryResultFormat format, bool use_local)
         {
-            if (format != QueryResultFormat::kJSON)
-            {
-                Console::stream() << "Using local repodata..." << std::endl;
-            }
-            auto exp_prefix_data = PrefixData::create(ctx.prefix_params.target_prefix, channel_context);
-            if (!exp_prefix_data)
-            {
-                // TODO: propagate tl::expected mechanism
-                throw std::runtime_error(exp_prefix_data.error().what());
-            }
-            PrefixData& prefix_data = exp_prefix_data.value();
-            MRepo(pool, prefix_data);
-            if (format != QueryResultFormat::kJSON)
-            {
-                Console::stream() << "Loaded current active prefix: "
-                                  << ctx.prefix_params.target_prefix << std::endl;
-            }
-        }
-        else
-        {
-            if (format != QueryResultFormat::kJSON)
-            {
-                Console::stream() << "Getting repodata from channels..." << std::endl;
-            }
-            auto exp_load = load_channels(pool, package_caches, 0);
-            if (!exp_load)
-            {
-                throw std::runtime_error(exp_load.error().what());
-            }
-        }
+            config.at("use_target_prefix_fallback").set_value(true);
+            config.at("target_prefix_checks")
+                .set_value(MAMBA_ALLOW_EXISTING_PREFIX | MAMBA_ALLOW_MISSING_PREFIX);
+            config.load();
 
-        Query q(pool);
-        if (type == QueryType::kSEARCH)
-        {
-            if (ctx.output_params.json)
+            auto channel_context = ChannelContext::make_conda_compatible(ctx);
+            solver::libsolv::Database db{ channel_context.params() };
+            add_spdlog_logger_to_database(db);
+
+            // bool installed = (type == QueryType::kDepends) || (type == QueryType::kWhoneeds);
+            MultiPackageCache package_caches(ctx.pkgs_dirs, ctx.validation_params);
+            if (use_local)
             {
-                std::cout << q.find(query).groupby("name").json(pool.channel_context()).dump(4);
+                if (format != QueryResultFormat::Json)
+                {
+                    Console::stream() << "Using local repodata..." << std::endl;
+                }
+                auto exp_prefix_data = PrefixData::create(
+                    ctx.prefix_params.target_prefix,
+                    channel_context
+                );
+                if (!exp_prefix_data)
+                {
+                    // TODO: propagate tl::expected mechanism
+                    throw std::runtime_error(exp_prefix_data.error().what());
+                }
+                PrefixData& prefix_data = exp_prefix_data.value();
+
+                load_installed_packages_in_database(ctx, db, prefix_data);
+
+                if (format != QueryResultFormat::Json)
+                {
+                    Console::stream()
+                        << "Loaded current active prefix: " << ctx.prefix_params.target_prefix
+                        << std::endl;
+                }
             }
             else
             {
-                std::cout << "\n" << std::endl;
-                auto res = q.find(query);
-                switch (format)
+                if (format != QueryResultFormat::Json)
                 {
-                    case QueryResultFormat::kJSON:
-                        std::cout << res.json(pool.channel_context()).dump(4);
-                        break;
-                    case QueryResultFormat::kPRETTY:
-                        res.pretty(std::cout);
-                        break;
-                    default:
-                        res.groupby("name").table(std::cout);
+                    Console::stream() << "Getting repodata from channels..." << std::endl;
                 }
-                if (res.empty())
+                auto exp_load = load_channels(ctx, channel_context, db, package_caches);
+                if (!exp_load)
                 {
-                    std::cout << "Channels may not be configured. Try giving a channel with '-c,--channel' option, or use `--use-local=1` to search for installed packages."
-                              << std::endl;
+                    throw std::runtime_error(exp_load.error().what());
                 }
             }
+            return db;
         }
-        else if (type == QueryType::kDEPENDS)
+    }
+
+    auto make_repoquery(
+        solver::libsolv::Database& db,
+        QueryType type,
+        QueryResultFormat format,
+        const std::vector<std::string>& queries,
+        bool show_all_builds,
+        const Context::GraphicsParams& graphics_params,
+        std::ostream& out
+    ) -> bool
+    {
+        if (type == QueryType::Search)
         {
-            auto res = q.depends(
-                query,
-                format == QueryResultFormat::kTREE || format == QueryResultFormat::kRECURSIVETABLE
+            auto res = Query::find(db, queries);
+            switch (format)
+            {
+                case QueryResultFormat::Json:
+                    out << res.groupby("name").json().dump(4);
+                    break;
+                case QueryResultFormat::Pretty:
+                    res.pretty(out, show_all_builds);
+                    break;
+                default:
+                    res.groupby("name").table(out);
+            }
+            return !res.empty();
+        }
+        else if (type == QueryType::Depends)
+        {
+            if (queries.size() != 1)
+            {
+                throw std::invalid_argument("Only one query supported for 'depends'.");
+            }
+            auto res = Query::depends(
+                db,
+                queries.front(),
+                /* tree= */ format == QueryResultFormat::Tree
+                    || format == QueryResultFormat::RecursiveTable
             );
             switch (format)
             {
-                case QueryResultFormat::kTREE:
-                case QueryResultFormat::kPRETTY:
-                    res.tree(std::cout, config.context().graphics_params);
+                case QueryResultFormat::Tree:
+                case QueryResultFormat::Pretty:
+                    res.tree(out, graphics_params);
                     break;
-                case QueryResultFormat::kJSON:
-                    std::cout << res.json(pool.channel_context()).dump(4);
+                case QueryResultFormat::Json:
+                    out << res.json().dump(4);
                     break;
-                case QueryResultFormat::kTABLE:
-                case QueryResultFormat::kRECURSIVETABLE:
-                    res.sort("name").table(std::cout);
+                case QueryResultFormat::Table:
+                case QueryResultFormat::RecursiveTable:
+                    res.sort("name").table(out);
             }
-            if (res.empty() && format != QueryResultFormat::kJSON)
-            {
-                std::cout << query
-                          << " may not be installed. Try giving a channel with '-c,--channel' option for remote repoquery"
-                          << std::endl;
-            }
+            return !res.empty();
         }
-        else if (type == QueryType::kWHONEEDS)
+        else if (type == QueryType::WhoNeeds)
         {
-            auto res = q.whoneeds(
-                query,
-                format == QueryResultFormat::kTREE || format == QueryResultFormat::kRECURSIVETABLE
+            if (queries.size() != 1)
+            {
+                throw std::invalid_argument("Only one query supported for 'whoneeds'.");
+            }
+            auto res = Query::whoneeds(
+                db,
+                queries.front(),
+                /* tree= */ format == QueryResultFormat::Tree
+                    || format == QueryResultFormat::RecursiveTable
             );
             switch (format)
             {
-                case QueryResultFormat::kTREE:
-                case QueryResultFormat::kPRETTY:
-                    res.tree(std::cout, config.context().graphics_params);
+                case QueryResultFormat::Tree:
+                case QueryResultFormat::Pretty:
+                    res.tree(out, graphics_params);
                     break;
-                case QueryResultFormat::kJSON:
-                    std::cout << res.json(pool.channel_context()).dump(4);
+                case QueryResultFormat::Json:
+                    out << res.json().dump(4);
                     break;
-                case QueryResultFormat::kTABLE:
-                case QueryResultFormat::kRECURSIVETABLE:
+                case QueryResultFormat::Table:
+                case QueryResultFormat::RecursiveTable:
                     res.sort("name").table(
-                        std::cout,
+                        out,
                         { "Name",
                           "Version",
                           "Build",
                           printers::alignmentMarker(printers::alignment::left),
                           printers::alignmentMarker(printers::alignment::right),
-                          util::concat("Depends:", query),
+                          util::concat("Depends:", queries.front()),
                           "Channel",
                           "Subdir" }
                     );
             }
-            if (res.empty() && format != QueryResultFormat::kJSON)
-            {
-                std::cout << query
-                          << " may not be installed. Try giving a channel with '-c,--channel' option for remote repoquery"
-                          << std::endl;
-            }
+            return !res.empty();
         }
+        throw std::invalid_argument("Invalid QueryType");
     }
+
+    bool repoquery(
+        Configuration& config,
+        QueryType type,
+        QueryResultFormat format,
+        bool use_local,
+        const std::vector<std::string>& queries
+    )
+    {
+        auto& ctx = config.context();
+        auto db = repoquery_init(ctx, config, format, use_local);
+        return make_repoquery(
+            db,
+            type,
+            format,
+            queries,
+            ctx.output_params.verbosity > 0,
+            ctx.graphics_params,
+            std::cout
+        );
+    }
+
 }

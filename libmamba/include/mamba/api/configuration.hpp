@@ -14,10 +14,9 @@
 #include "mamba/api/configuration_impl.hpp"
 #include "mamba/api/constants.hpp"
 #include "mamba/core/context.hpp"
-#include "mamba/core/environment.hpp"
-#include "mamba/core/mamba_fs.hpp"
 #include "mamba/core/output.hpp"
-
+#include "mamba/fs/filesystem.hpp"
+#include "mamba/util/environment.hpp"
 
 namespace mamba
 {
@@ -407,6 +406,7 @@ namespace mamba
         {
             return m_context;
         }
+
         const Context& context() const
         {
             return m_context;
@@ -423,11 +423,11 @@ namespace mamba
         void clear_values();
 
         /**
-         * Pop values that should have a single operation lifetime to avoid memroy effect
+         * Pop values that should have a single operation lifetime to avoid memory effect
          * between multiple operations.
          * It corresponds to CLI values in most of the cases, but may also include API
          * values if the `Configurable::has_single_op_lifetime` method returns true.
-         * RC files and environment variables are always overriden when loading the
+         * RC files and environment variables are always overridden when loading the
          * configuration.
          */
         void operation_teardown();
@@ -697,7 +697,7 @@ namespace mamba
             {
                 for (const auto& env_var : m_env_var_names)
                 {
-                    auto env_var_value = env::get(env_var);
+                    auto env_var_value = util::get_env(env_var);
                     if (env_var_value)
                     {
                         try

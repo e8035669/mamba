@@ -1,0 +1,23 @@
+{
+  "info": {
+    "subdir": "noarch"
+  },
+  "packages": {
+    "test-package-0.1-0.tar.bz2": {
+      "build": "0",
+      "build_number": 0,
+      "depends": [],
+      "license": "BSD",
+      "md5": "719449904d9d4ac9853437a9504f87c5",
+      "name": "test-package",
+      "sha256": "1c8942fd0ad0dd3f780bff1a159a6ff8b82968965a630b3e1bff27b7168f68b5",
+      "size": 5747,
+      "subdir": "noarch",
+      "timestamp": 1613117294,
+      "version": "0.1"
+    }
+  },
+  "packages.conda": {},
+  "removed": [],
+  "repodata_version": 1
+}

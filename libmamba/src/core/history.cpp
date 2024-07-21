@@ -6,6 +6,7 @@
 
 #include <regex>
 
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/context.hpp"
 #include "mamba/core/fsutil.hpp"
 #include "mamba/core/history.hpp"
@@ -190,17 +191,19 @@ namespace mamba
         return res;
     }
 
-    std::unordered_map<std::string, MatchSpec> History::get_requested_specs_map()
+    std::unordered_map<std::string, specs::MatchSpec> History::get_requested_specs_map()
     {
-        std::unordered_map<std::string, MatchSpec> map;
+        std::unordered_map<std::string, specs::MatchSpec> map;
 
         auto to_specs = [&](const std::vector<std::string>& sv)
         {
-            std::vector<MatchSpec> v;
+            std::vector<specs::MatchSpec> v;
             v.reserve(sv.size());
             for (const auto& el : sv)
             {
-                v.emplace_back(el, m_channel_context);
+                v.emplace_back(specs::MatchSpec::parse(el)
+                                   .or_else([](specs::ParseError&& err) { throw std::move(err); })
+                                   .value());
             }
             return v;
         };
@@ -210,34 +213,20 @@ namespace mamba
             auto remove_specs = to_specs(request.remove);
             for (auto& spec : remove_specs)
             {
-                map.erase(spec.name);
+                map.erase(spec.name().str());
             }
             auto update_specs = to_specs(request.update);
             for (auto& spec : update_specs)
             {
-                map[spec.name] = spec;
+                map[spec.name().str()] = spec;
             }
             auto neutered_specs = to_specs(request.neutered);
             for (auto& spec : neutered_specs)
             {
-                map[spec.name] = spec;
+                map[spec.name().str()] = spec;
             }
         }
 
-        // TODO Add this back in once we merge the PrefixData PR!
-        // auto& current_records = m_prefix->records();
-        // for (auto it = map.begin(); it != map.end();)
-        // {
-        //     if (current_records.find(it->first) == current_records.end())
-        //     {
-        //         LOG_INFO << it->first << " not installed, removing from specs";
-        //         it = map.erase(it);
-        //     }
-        //     else
-        //     {
-        //         it++;
-        //     }
-        // }
         return map;
     }
 

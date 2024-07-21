@@ -18,6 +18,7 @@
 
 #include <intrin.h>
 #include <io.h>
+#include <shlobj_core.h>
 #include <windows.h>
 // Incomplete header included last
 #include <tlhelp32.h>
@@ -31,10 +32,11 @@
 #include <fmt/ostream.h>
 #include <reproc++/run.hpp>
 
-#include "mamba/core/environment.hpp"
 #include "mamba/core/output.hpp"
 #include "mamba/core/util_os.hpp"
 #include "mamba/util/build.hpp"
+#include "mamba/util/environment.hpp"
+#include "mamba/util/os_win.hpp"
 #include "mamba/util/string.hpp"
 
 #ifdef _WIN32
@@ -137,10 +139,17 @@ namespace mamba
     bool enable_long_paths_support(bool force, Palette palette)
     {
         // Needs to be set system-wide & can only be run as admin ...
-        std::string win_ver = windows_version();
-        auto splitted = util::split(win_ver, ".");
-        if (!(splitted.size() >= 3 && std::stoull(splitted[0]) >= 10
-              && std::stoull(splitted[2]) >= 14352))
+
+        auto win_ver = util::windows_version();
+        if (!win_ver.has_value())
+        {
+            LOG_WARNING << "Not setting long path registry key; Windows version must be at least 10 "
+                           "with the fall 2016 \"Anniversary update\" or newer.";
+            return false;
+        }
+        auto split_out = util::split(win_ver.value(), ".");
+        if (!(split_out.size() >= 3 && std::stoull(split_out[0]) >= 10
+              && std::stoull(split_out[2]) >= 14352))
         {
             LOG_WARNING << "Not setting long path registry key; Windows version must be at least 10 "
                            "with the fall 2016 \"Anniversary update\" or newer.";
@@ -208,141 +217,7 @@ namespace mamba
         LOG_WARNING << "Changing registry value did not succeed.";
         return false;
     }
-#endif
 
-    std::string windows_version()
-    {
-        LOG_DEBUG << "Loading Windows virtual package";
-        auto override_version = env::get("CONDA_OVERRIDE_WIN");
-        if (override_version)
-        {
-            return override_version.value();
-        }
-
-        if (!util::on_win)
-        {
-            return "";
-        }
-
-        std::string out, err;
-        std::vector<std::string> args = { env::get("COMSPEC").value_or(""), "/c", "ver" };
-        auto [status, ec] = reproc::run(
-            args,
-            reproc::options{},
-            reproc::sink::string(out),
-            reproc::sink::string(err)
-        );
-
-        if (ec)
-        {
-            LOG_WARNING << "Could not find Windows version by calling 'ver'\n"
-                        << "Please file a bug report.\nError: " << ec.message();
-            return "";
-        }
-        std::string xout(util::strip(out));
-
-        // from python
-        std::regex ver_output_regex("(?:([\\w ]+) ([\\w.]+) .*\\[.* ([\\d.]+)\\])");
-
-        std::smatch rmatch;
-
-        std::string full_version, norm_version;
-        if (std::regex_match(xout, rmatch, ver_output_regex))
-        {
-            full_version = rmatch[3];
-            auto version_els = util::split(full_version, ".");
-            norm_version = util::concat(version_els[0], ".", version_els[1], ".", version_els[2]);
-            LOG_DEBUG << "Windows version found: " << norm_version;
-        }
-        else
-        {
-            LOG_DEBUG << "Windows version not found";
-            norm_version = "0.0.0";
-        }
-        return norm_version;
-    }
-
-    std::string macos_version()
-    {
-        LOG_DEBUG << "Loading macos virtual package";
-        auto override_version = env::get("CONDA_OVERRIDE_OSX");
-        if (override_version)
-        {
-            return override_version.value();
-        }
-
-        if (!util::on_mac)
-        {
-            return "";
-        }
-
-        std::string out, err;
-        // Note: we could also inspect /System/Library/CoreServices/SystemVersion.plist which is
-        // an XML file
-        //       that contains the same information. However, then we'd either need an xml
-        //       parser or some other crude method to read the data
-        std::vector<std::string> args = { "sw_vers", "-productVersion" };
-        auto [status, ec] = reproc::run(
-            args,
-            reproc::options{},
-            reproc::sink::string(out),
-            reproc::sink::string(err)
-        );
-
-        if (ec)
-        {
-            LOG_WARNING << "Could not find macOS version by calling 'sw_vers -productVersion'\nPlease file a bug report.\nError: "
-                        << ec.message();
-            return "";
-        }
-
-        auto version = std::string(util::strip(out));
-        LOG_DEBUG << "macos version found: " << version;
-        return version;
-    }
-
-    std::string linux_version()
-    {
-        LOG_DEBUG << "Loading linux virtual package";
-        auto override_version = env::get("CONDA_OVERRIDE_LINUX");
-        if (override_version)
-        {
-            return override_version.value();
-        }
-        if (!util::on_linux)
-        {
-            return "";
-        }
-
-#ifndef _WIN32
-        struct utsname uname_result = {};
-        const auto ret = ::uname(&uname_result);
-        if (ret != 0)
-        {
-            LOG_DEBUG << "Error calling uname (skipping): "
-                      << std::system_error(errno, std::generic_category()).what();
-        }
-
-        static const std::regex re("([0-9]+\\.[0-9]+\\.[0-9]+)(?:-.*)?");
-        std::smatch m;
-        std::string const version = uname_result.release;
-        if (std::regex_search(version, m, re))
-        {
-            if (m.size() == 2)
-            {
-                std::ssub_match linux_version = m[1];
-                LOG_DEBUG << "linux version found: " << linux_version;
-                return linux_version.str();
-            }
-        }
-
-        LOG_DEBUG << "Could not parse linux version";
-#endif
-
-        return "";
-    }
-
-#ifdef _WIN32
     DWORD getppid()
     {
         HANDLE hSnapshot;
@@ -485,97 +360,6 @@ namespace mamba
 #endif
     }
 
-#ifdef _WIN32
-    std::string to_utf8(const wchar_t* w, size_t s)
-    {
-        std::string output;
-        if (s != 0)
-        {
-            assert(s <= INT_MAX);
-            const int size = WideCharToMultiByte(
-                CP_UTF8,
-                0,
-                w,
-                static_cast<int>(s),
-                nullptr,
-                0,
-                nullptr,
-                nullptr
-            );
-            if (size <= 0)
-            {
-                unsigned long last_error = ::GetLastError();
-                LOG_ERROR << "Failed to convert string to UTF-8 "
-                          << std::system_category().message(static_cast<int>(last_error));
-                throw std::runtime_error("Failed to convert string to UTF-8");
-            }
-
-            output.resize(size);
-            int res_size = WideCharToMultiByte(
-                CP_UTF8,
-                0,
-                w,
-                static_cast<int>(s),
-                output.data(),
-                static_cast<int>(size),
-                nullptr,
-                nullptr
-            );
-            assert(res_size == size);
-        }
-
-        return output;
-    }
-
-    std::string to_utf8(const wchar_t* w)
-    {
-        return to_utf8(w, wcslen(w));
-    }
-
-    std::string to_utf8(const std::wstring& s)
-    {
-        return to_utf8(s.data(), s.size());
-    }
-
-    std::wstring to_windows_unicode(const std::string_view utf8_text)
-    {
-        std::wstring output;
-        if (!utf8_text.empty())
-        {
-            assert(utf8_text.size() <= INT_MAX);
-            const int size = MultiByteToWideChar(
-                CP_UTF8,
-                0,
-                utf8_text.data(),
-                utf8_text.size(),
-                nullptr,
-                0
-            );
-            if (size <= 0)
-            {
-                unsigned long last_error = ::GetLastError();
-                LOG_ERROR << "Failed to convert UTF-8 string to Windows Unicode (UTF-16)"
-                          << std::system_category().message(static_cast<int>(last_error));
-                throw std::runtime_error("Failed to convert UTF-8 string to UTF-16");
-            }
-
-            output.resize(size);
-            int res_size = MultiByteToWideChar(
-                CP_UTF8,
-                0,
-                utf8_text.data(),
-                utf8_text.size(),
-                output.data(),
-                output.size()
-            );
-            assert(res_size == size);
-        }
-
-        return output;
-    }
-
-#endif
-
     /* From https://github.com/ikalnytskyi/termcolor
      *
      * copyright: (c) 2013 by Ihor Kalnytskyi.
@@ -628,12 +412,14 @@ namespace mamba
                                                && console_mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING;
         features.true_colors = false;
 
-        std::string win_ver = windows_version();
-        auto splitted = util::split(win_ver, ".");
-        if (splitted.size() >= 3 && std::stoull(splitted[0]) >= 10
-            && std::stoull(splitted[2]) >= 15063)
+        if (auto version = util::windows_version())
         {
-            features.true_colors = true;
+            auto split_out = util::split(version.value(), '.');
+            if (split_out.size() >= 3 && std::stoull(split_out[0]) >= 10
+                && std::stoull(split_out[2]) >= 15063)
+            {
+                features.true_colors = true;
+            }
         }
 #endif
         return features;
@@ -685,24 +471,5 @@ namespace mamba
         {
             throw std::runtime_error(std::string("Could not codesign executable: ") + ec.message());
         }
-    }
-
-    std::string fix_win_path(const std::string& path)
-    {
-#ifdef _WIN32
-        if (util::starts_with(path, "file:"))
-        {
-            std::regex re(R"(\\(?! ))");
-            std::string res = std::regex_replace(path, re, R"(/)");
-            util::replace_all(res, ":////", "://");
-            return res;
-        }
-        else
-        {
-            return path;
-        }
-#else
-        return path;
-#endif
     }
 }

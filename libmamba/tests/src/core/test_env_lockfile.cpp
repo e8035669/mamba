@@ -7,13 +7,14 @@
 #include <doctest/doctest.h>
 #include <yaml-cpp/exceptions.h>
 
-#include "mamba/core/channel.hpp"
+#include "mamba/core/channel_context.hpp"
 #include "mamba/core/env_lockfile.hpp"
 #include "mamba/core/fsutil.hpp"
+#include "mamba/core/package_database_loader.hpp"
 #include "mamba/core/transaction.hpp"
+#include "mamba/solver/libsolv/database.hpp"
 
 #include "mambatests.hpp"
-#include "test_data.hpp"
 
 namespace mamba
 {
@@ -21,11 +22,7 @@ namespace mamba
     {
         TEST_CASE("absent_file_fails")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const auto maybe_lockfile = read_environment_lockfile(
-                channel_context,
-                "this/file/does/not/exists"
-            );
+            const auto maybe_lockfile = read_environment_lockfile("this/file/does/not/exists");
             REQUIRE_FALSE(maybe_lockfile);
             const auto error = maybe_lockfile.error();
             REQUIRE_EQ(mamba_error_code::env_lockfile_parsing_failed, error.error_code());
@@ -44,25 +41,21 @@ namespace mamba
 
         TEST_CASE("invalid_version_fails")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const fs::u8path invalid_version_lockfile_path{ test_data_dir
+            const fs::u8path invalid_version_lockfile_path{ mambatests::test_data_dir
                                                             / "env_lockfile/bad_version-lock.yaml" };
-            const auto maybe_lockfile = read_environment_lockfile(
-                channel_context,
-                invalid_version_lockfile_path
-            );
+            const auto maybe_lockfile = read_environment_lockfile(invalid_version_lockfile_path);
             REQUIRE_FALSE(maybe_lockfile);
             const auto error = maybe_lockfile.error();
             REQUIRE_EQ(mamba_error_code::env_lockfile_parsing_failed, error.error_code());
             const auto& error_details = EnvLockFileError::get_details(error);
-            CHECK_EQ(file_parsing_error_code::unsuported_version, error_details.parsing_error_code);
+            CHECK_EQ(file_parsing_error_code::unsupported_version, error_details.parsing_error_code);
         }
 
         TEST_CASE("valid_no_package_succeed")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const fs::u8path lockfile_path{ test_data_dir / "env_lockfile/good_no_package-lock.yaml" };
-            const auto maybe_lockfile = read_environment_lockfile(channel_context, lockfile_path);
+            const fs::u8path lockfile_path{ mambatests::test_data_dir
+                                            / "env_lockfile/good_no_package-lock.yaml" };
+            const auto maybe_lockfile = read_environment_lockfile(lockfile_path);
             REQUIRE_MESSAGE(maybe_lockfile, maybe_lockfile.error().what());
             const auto lockfile = maybe_lockfile.value();
             CHECK(lockfile.get_all_packages().empty());
@@ -70,9 +63,9 @@ namespace mamba
 
         TEST_CASE("invalid_package_fails")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const fs::u8path lockfile_path{ test_data_dir / "env_lockfile/bad_package-lock.yaml" };
-            const auto maybe_lockfile = read_environment_lockfile(channel_context, lockfile_path);
+            const fs::u8path lockfile_path{ mambatests::test_data_dir
+                                            / "env_lockfile/bad_package-lock.yaml" };
+            const auto maybe_lockfile = read_environment_lockfile(lockfile_path);
             REQUIRE_FALSE(maybe_lockfile);
             const auto error = maybe_lockfile.error();
             REQUIRE_EQ(mamba_error_code::env_lockfile_parsing_failed, error.error_code());
@@ -82,10 +75,9 @@ namespace mamba
 
         TEST_CASE("valid_one_package_succeed")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const fs::u8path lockfile_path{ test_data_dir
+            const fs::u8path lockfile_path{ mambatests::test_data_dir
                                             / "env_lockfile/good_one_package-lock.yaml" };
-            const auto maybe_lockfile = read_environment_lockfile(channel_context, lockfile_path);
+            const auto maybe_lockfile = read_environment_lockfile(lockfile_path);
             REQUIRE_MESSAGE(maybe_lockfile, maybe_lockfile.error().what());
             const auto lockfile = maybe_lockfile.value();
             CHECK_EQ(lockfile.get_all_packages().size(), 1);
@@ -93,11 +85,10 @@ namespace mamba
 
         TEST_CASE("valid_one_package_implicit_category")
         {
-            ChannelContext channel_context{ mambatests::context() };
             const fs::u8path lockfile_path{
-                test_data_dir / "env_lockfile/good_one_package_missing_category-lock.yaml"
+                mambatests::test_data_dir / "env_lockfile/good_one_package_missing_category-lock.yaml"
             };
-            const auto maybe_lockfile = read_environment_lockfile(channel_context, lockfile_path);
+            const auto maybe_lockfile = read_environment_lockfile(lockfile_path);
             REQUIRE_MESSAGE(maybe_lockfile, maybe_lockfile.error().what());
             const auto lockfile = maybe_lockfile.value();
             CHECK_EQ(lockfile.get_all_packages().size(), 1);
@@ -105,10 +96,9 @@ namespace mamba
 
         TEST_CASE("valid_multiple_packages_succeed")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const fs::u8path lockfile_path{ test_data_dir
+            const fs::u8path lockfile_path{ mambatests::test_data_dir
                                             / "env_lockfile/good_multiple_packages-lock.yaml" };
-            const auto maybe_lockfile = read_environment_lockfile(channel_context, lockfile_path);
+            const auto maybe_lockfile = read_environment_lockfile(lockfile_path);
             REQUIRE_MESSAGE(maybe_lockfile, maybe_lockfile.error().what());
             const auto lockfile = maybe_lockfile.value();
             CHECK_GT(lockfile.get_all_packages().size(), 1);
@@ -116,10 +106,9 @@ namespace mamba
 
         TEST_CASE("get_specific_packages")
         {
-            ChannelContext channel_context{ mambatests::context() };
-            const fs::u8path lockfile_path{ test_data_dir
+            const fs::u8path lockfile_path{ mambatests::test_data_dir
                                             / "env_lockfile/good_multiple_packages-lock.yaml" };
-            const auto lockfile = read_environment_lockfile(channel_context, lockfile_path).value();
+            const auto lockfile = read_environment_lockfile(lockfile_path).value();
             CHECK(lockfile.get_packages_for("", "", "").empty());
             {
                 const auto packages = lockfile.get_packages_for("main", "linux-64", "conda");
@@ -136,10 +125,11 @@ namespace mamba
         TEST_CASE("create_transaction_with_categories")
         {
             auto& ctx = mambatests::context();
-            const fs::u8path lockfile_path{ test_data_dir
+            const fs::u8path lockfile_path{ mambatests::test_data_dir
                                             / "env_lockfile/good_multiple_categories-lock.yaml" };
-            ChannelContext channel_context{ ctx };
-            MPool pool{ channel_context };
+            auto channel_context = ChannelContext::make_conda_compatible(mambatests::context());
+            solver::libsolv::Database db{ channel_context.params() };
+            add_spdlog_logger_to_database(db);
             mamba::MultiPackageCache pkg_cache({ "/tmp/" }, ctx.validation_params);
 
             ctx.platform = "linux-64";
@@ -149,7 +139,8 @@ namespace mamba
             {
                 std::vector<detail::other_pkg_mgr_spec> other_specs;
                 auto transaction = create_explicit_transaction_from_lockfile(
-                    pool,
+                    ctx,
+                    db,
                     lockfile_path,
                     categories,
                     pkg_cache,

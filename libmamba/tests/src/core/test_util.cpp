@@ -7,63 +7,16 @@
 #include <doctest/doctest.h>
 
 #include "mamba/core/context.hpp"
-#include "mamba/core/environment.hpp"
-#include "mamba/core/execution.hpp"
 #include "mamba/core/fsutil.hpp"
-#include "mamba/core/mamba_fs.hpp"
 #include "mamba/core/util.hpp"
-#include "mamba/core/util_random.hpp"
 #include "mamba/core/util_scope.hpp"
+#include "mamba/fs/filesystem.hpp"
+#include "mamba/util/path_manip.hpp"
 
 #include "mambatests.hpp"
 
 namespace mamba
 {
-    TEST_SUITE("local_random_generator")
-    {
-        TEST_CASE("one_rng_per_thread_and_type")
-        {
-            auto same_thread_checks = []
-            {
-                auto& a = local_random_generator();
-                auto& b = local_random_generator();
-                CHECK_EQ(&a, &b);
-
-                auto& c = local_random_generator<std::mt19937>();
-                CHECK_EQ(&a, &c);
-
-                auto& d = local_random_generator<std::mt19937_64>();
-                CHECK_NE(static_cast<void*>(&a), static_cast<void*>(&d));
-
-                return &a;
-            };
-            void* pointer_to_this_thread_rng = same_thread_checks();
-
-            void* pointer_to_another_thread_rng = nullptr;
-            std::thread another_thread{ [&]
-                                        { pointer_to_another_thread_rng = same_thread_checks(); } };
-            another_thread.join();
-
-            CHECK_NE(pointer_to_this_thread_rng, pointer_to_another_thread_rng);
-        }
-    }
-
-    TEST_SUITE("random_int")
-    {
-        TEST_CASE("value_in_range")
-        {
-            constexpr int arbitrary_min = -20;
-            constexpr int arbitrary_max = 20;
-            constexpr int attempts = 2000;
-            for (int i = 0; i < attempts; ++i)
-            {
-                const int value = random_int(arbitrary_min, arbitrary_max);
-                REQUIRE_GE(value, arbitrary_min);
-                REQUIRE_LE(value, arbitrary_max);
-            }
-        }
-    }
-
     TEST_SUITE("on_scope_exit")
     {
         TEST_CASE("basics")
@@ -111,25 +64,6 @@ namespace mamba
         }
     }
 
-    TEST_SUITE("utils")
-    {
-        TEST_CASE("encode_decode_base64")
-        {
-            for (std::size_t i = 1; i < 20; ++i)
-            {
-                for (std::size_t j = 0; j < 5; ++j)
-                {
-                    std::string r = mamba::generate_random_alphanumeric_string(i);
-                    auto e = encode_base64(r);
-                    CHECK(e);
-                    auto x = decode_base64(e.value());
-                    CHECK(x);
-                    CHECK_EQ(r, x.value());
-                }
-            }
-        }
-    }
-
     TEST_SUITE("fsutils")
     {
         TEST_CASE("is_writable")
@@ -150,7 +84,7 @@ namespace mamba
 
             CHECK(path::is_writable(test_dir_path / "non-existing-writable-test-delete-me.txt"));
             CHECK(path::is_writable(
-                env::expand_user("~/.libmamba-non-existing-writable-test-delete-me.txt")
+                util::expand_home("~/.libmamba-non-existing-writable-test-delete-me.txt")
             ));
 
             CHECK(path::is_writable(test_dir_path / "non-existing-subfolder"));

@@ -1,6 +1,12 @@
 # Git files
 *.orig
 
+# User Taskfile.yml
+Taskfile.yml
+Taskfile.yaml
+taskfile.yml
+taskfile.yaml
+
 # Mamba generated files
 include/mamba/core/version.hpp
 
@@ -82,3 +88,4 @@ __cache__/
 installed.json
 tmp/
 test_7.json.state
+_skbuild/

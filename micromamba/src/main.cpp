@@ -11,6 +11,8 @@
 #include <windows.h>
 // Incomplete header included last
 #include <shellapi.h>
+
+#include "mamba/util/os_win.hpp"
 #endif
 
 #include <CLI/CLI.hpp>
@@ -21,7 +23,6 @@
 #include "mamba/core/output.hpp"
 #include "mamba/core/thread_utils.hpp"
 #include "mamba/core/util_os.hpp"
-#include "mamba/core/util_scope.hpp"
 #include "mamba/version.hpp"
 
 #include "umamba.hpp"
@@ -29,20 +30,20 @@
 
 using namespace mamba;  // NOLINT(build/namespaces)
 
-
 int
 main(int argc, char** argv)
 {
     mamba::MainExecutor scoped_threads;
     mamba::Context ctx{ {
-        /* .enable_logging_and_signal_handling = */ true,
+        /* .enable_logging = */ true,
+        /* .enable_signal_handling = */ true,
     } };
     mamba::Console console{ ctx };
     mamba::Configuration config{ ctx };
 
     init_console();
 
-    ctx.command_params.is_micromamba = true;
+    ctx.command_params.is_mamba_exe = true;
 
     CLI::App app{ "Version: " + version() + "\n" };
     set_umamba_command(&app, config);
@@ -57,7 +58,7 @@ main(int argc, char** argv)
     std::vector<char*> utf8CharArgs;
     for (int i = 0; i < argc; i++)
     {
-        utf8Args.push_back(to_utf8(wargv[i]));
+        utf8Args.push_back(util::windows_encoding_to_utf8(wargv[i]));
     }
     for (int i = 0; i < argc; ++i)
     {

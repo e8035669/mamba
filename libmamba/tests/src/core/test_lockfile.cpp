@@ -11,8 +11,8 @@
 #include <reproc++/run.hpp>
 
 #include "mamba/core/context.hpp"
-#include "mamba/core/mamba_fs.hpp"
 #include "mamba/core/util.hpp"
+#include "mamba/fs/filesystem.hpp"
 
 #include "spdlog/spdlog.h"
 
@@ -27,15 +27,10 @@ extern "C"
 }
 #endif
 
+#include "mambatests.hpp"
 
 namespace mamba
 {
-
-#ifndef MAMBA_TEST_LOCK_EXE
-#error "MAMBA_TEST_LOCK_EXE must be defined pointing to testing_libmamba_lock"
-#endif
-    inline static const fs::u8path testing_libmamba_lock_exe = MAMBA_TEST_LOCK_EXE;
-
     namespace testing
     {
 
@@ -60,7 +55,6 @@ namespace mamba
                 spdlog::set_level(spdlog::level::info);
             }
         };
-
 
         TEST_SUITE("LockDirTest")
         {
@@ -123,7 +117,7 @@ namespace mamba
 
             TEST_CASE_FIXTURE(LockDirTest, "different_pid")
             {
-                std::string const lock_exe = testing_libmamba_lock_exe.string();
+                const std::string lock_exe = mambatests::testing_libmamba_lock_exe.string();
                 std::string out, err;
                 std::vector<std::string> args;
 
@@ -152,7 +146,7 @@ namespace mamba
                     }
                     catch (...)
                     {
-                        std::cout << "convertion error" << std::endl;
+                        std::cout << "conversion error" << std::endl;
                     }
                     CHECK(is_locked);
 
@@ -174,7 +168,7 @@ namespace mamba
                     }
                     catch (...)
                     {
-                        std::cout << "convertion error" << std::endl;
+                        std::cout << "conversion error" << std::endl;
                     }
                     CHECK_FALSE(new_lock_created);
                 }
@@ -247,7 +241,7 @@ namespace mamba
 
             TEST_CASE_FIXTURE(LockFileTest, "different_pid")
             {
-                std::string const lock_exe = testing_libmamba_lock_exe.string();
+                const std::string lock_exe = mambatests::testing_libmamba_lock_exe.string();
                 std::string out, err;
                 std::vector<std::string> args;
                 {
@@ -276,7 +270,7 @@ namespace mamba
                     }
                     catch (...)
                     {
-                        std::cout << "convertion error" << std::endl;
+                        std::cout << "conversion error" << std::endl;
                     }
                     CHECK(is_locked);
 
@@ -298,7 +292,7 @@ namespace mamba
                     }
                     catch (...)
                     {
-                        std::cout << "convertion error" << std::endl;
+                        std::cout << "conversion error" << std::endl;
                     }
                     CHECK_FALSE(new_lock_created);
                 }

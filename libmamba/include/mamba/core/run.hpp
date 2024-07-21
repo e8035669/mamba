@@ -9,8 +9,8 @@
 
 #include <nlohmann/json.hpp>
 
-#include "mamba/core/mamba_fs.hpp"
 #include "mamba/core/util.hpp"
+#include "mamba/fs/filesystem.hpp"
 
 namespace mamba
 {
@@ -22,6 +22,7 @@ namespace mamba
     LockFile lock_proc_dir();
 
     void daemonize();
+
     class ScopedProcFile
     {
         const fs::u8path location;

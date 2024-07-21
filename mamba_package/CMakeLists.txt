@@ -4,42 +4,28 @@
 #
 # The full license is in the file LICENSE, distributed with this software.
 
-cmake_minimum_required (VERSION 3.16)
+cmake_minimum_required(VERSION 3.16)
 cmake_policy(SET CMP0025 NEW) # Introduced in cmake 3.0
 cmake_policy(SET CMP0077 NEW) # Introduced in cmake 3.13
 
 project(mamba-package)
 
-# Build options
-# =============
-
-if (BUILD_STATIC AND NOT BUILD_SHARED)
-    set(MAMBA_PACKAGE_LINKAGE "STATIC" CACHE STRING "mamba-package linkage against libraries")
-else ()
-    set(MAMBA_PACKAGE_LINKAGE "DYNAMIC" CACHE STRING "mamba-package linkage against libraries")
-endif ()
-
-string(TOUPPER "${MAMBA_PACKAGE_LINKAGE}" linkage_upper)
-message(STATUS "'mamba-package' linkage: ${MAMBA_PACKAGE_LINKAGE}")
-
 # Source files
 # ============
 
-set(MAMBA_PACKAGE_SRCS
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/package.cpp
+set(
+    MAMBA_PACKAGE_SRCS
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/main.cpp ${CMAKE_CURRENT_SOURCE_DIR}/src/package.cpp
 )
 
-set(MAMBA_PACKAGE_HEADERS
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/package.hpp
-)
+set(MAMBA_PACKAGE_HEADERS ${CMAKE_CURRENT_SOURCE_DIR}/src/package.hpp)
 
 # Dependencies
 # ============
 
-if(NOT (TARGET libmamba OR TARGET libmamba-static))
+if(NOT TARGET mamba::libmamba)
     find_package(libmamba REQUIRED)
-endif ()
+endif()
 
 # Build definition
 # ================
@@ -47,15 +33,8 @@ endif ()
 add_executable(mamba-package ${MAMBA_PACKAGE_SRCS} ${MAMBA_PACKAGE_HEADERS})
 mamba_target_add_compile_warnings(mamba-package WARNING_AS_ERROR ${MAMBA_WARNING_AS_ERROR})
 
-if (${MAMBA_PACKAGE_LINKAGE} STREQUAL "STATIC")
-    target_link_libraries(mamba-package PRIVATE libmamba-static)
-    if (WIN32)
-        set_target_properties(mamba-package PROPERTIES MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    endif ()
-else ()
-    target_link_libraries(mamba-package PRIVATE libmamba)
-endif ()
+target_link_libraries(mamba-package PRIVATE mamba::libmamba)
 
-set_property(TARGET mamba-package PROPERTY CXX_STANDARD 17)
+set_target_properties(mamba-package PROPERTIES CXX_STANDARD 17)
 
 install(TARGETS mamba-package)
