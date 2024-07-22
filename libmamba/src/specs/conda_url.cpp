@@ -378,7 +378,7 @@ namespace mamba::specs
         if (has_archive_extension(path(Decode::no)))
         {
             auto l_path = clear_path();
-            const auto pos = std::min(std::min(l_path.rfind('/'), l_path.size()) + 1ul, l_path.size());
+            const auto pos = std::min(std::min(l_path.rfind('/'), l_path.size()) + 1, l_path.size());
             l_path.replace(pos, std::string::npos, pkg);
             Base::set_path(std::move(l_path), Encode::no);
         }
